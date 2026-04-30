@@ -11,13 +11,13 @@
         #ui { position: absolute; top: 20px; left: 20px; color: var(--text); pointer-events: none; z-index: 10; width: calc(100% - 40px); display: flex; justify-content: space-between; }
         .stats { font-size: 14px; font-weight: bold; background: var(--ui-panel); padding: 12px; border-radius: 10px; border: 1px solid var(--main); }
         #theme-btn { pointer-events: auto; background: var(--ui-panel); border: 1px solid var(--main); color: var(--text); padding: 10px; border-radius: 8px; font-weight: bold; }
-        #speed-indicator { color: #ffff00; display: none; margin-top: 5px; }
+        #speed-indicator { color: #ffff00; display: none; margin-top: 5px; font-size: 12px; }
         #controls { position: absolute; bottom: 30px; width: 100%; display: flex; justify-content: space-around; pointer-events: none; }
         #joystick { width: 80px; height: 80px; border: 2px solid var(--main); border-radius: 50%; position: relative; pointer-events: auto; }
         #stick { width: 30px; height: 30px; background: var(--main); border-radius: 50%; position: absolute; left: 25px; top: 25px; }
-        .btn { width: 70px; height: 70px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; pointer-events: auto; user-select: none; }
-        #bow-btn { background: rgba(0, 136, 255, 0.4); border: 2px solid #0088ff;left:80%; }
-        #attack-btn { background: rgba(255, 0, 85, 0.4); border: 2px solid #ff0055;left:90%; }
+        .btn { width: 75px; height: 75px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; pointer-events: auto; user-select: none; font-size: 28px; transition: 0.1s; }
+        #bow-btn { background: rgba(0, 136, 255, 0.4); border: 2px solid #0088ff; }
+        #attack-btn { background: rgba(255, 0, 85, 0.4); border: 2px solid #ff0055; }
     </style>
 </head>
 <body>
@@ -42,24 +42,34 @@
     <script type="module">
         import * as THREE from 'three';
 
-        const WORLD_SEED = 15, MAP_SIZE = 45, SHAPE_COUNT = 250;
+        const WORLD_SEED = 99, MAP_SIZE = 50, SHAPE_COUNT = 150, RESPAWN_MS = 2000;
         const SB_URL = 'https://olicbodhjgfotfgiodfr.supabase.co', SB_KEY = 'sb_publishable_4y90bVcBOvGok71eftoLzw_G6xeP9bn';
         const sb = supabase.createClient(SB_URL, SB_KEY), myId = 'p' + Math.floor(Math.random() * 1000);
 
-        let isMaster = false, score = 0, moveSpeed = 0.02, speedTimer = 0, isDark = true;
-        const shapes = {}, others = {}, arrows = [], bonuses = [];
+        let score = 0, moveSpeed = 0.02, speedTimer = 0, isDark = true;
+        const shapes = {}, others = {}, arrows = [], bonuses = {}, particles = [];
 
         const scene = new THREE.Scene(); scene.background = new THREE.Color(0x050505);
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 500);
-        const renderer = new THREE.WebGLRenderer({ antialias: false });
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight); document.body.appendChild(renderer.domElement);
 
         const light = new THREE.DirectionalLight(0xffffff, 1.5); light.position.set(10, 20, 10);
         const ambient = new THREE.AmbientLight(0x404040); scene.add(light, ambient);
         const grid = new THREE.GridHelper(100, 40, 0x00ff88, 0x222222); scene.add(grid);
 
-        const geoms = [new THREE.BoxGeometry(0.7,0.7,0.7), new THREE.SphereGeometry(0.4,8,8), new THREE.OctahedronGeometry(0.6)];
-        const colors = [0x00ff88, 0x0088ff, 0xff0055, 0xffff00];
+        function seededRandom(s) { const x = Math.sin(s) * 10000; return x - Math.floor(x); }
+
+        const geoms = [
+            new THREE.SphereGeometry(0.5, 12, 12),
+            new THREE.BoxGeometry(0.7, 0.7, 0.7),
+            new THREE.CylinderGeometry(0.4, 0.4, 0.8, 16),
+            new THREE.ConeGeometry(0.5, 0.9, 16),
+            new THREE.ConeGeometry(0.6, 0.9, 4), 
+            new THREE.CylinderGeometry(0.4, 0.4, 0.8, 3), 
+            new THREE.OctahedronGeometry(0.6)
+        ];
+        const colors = [0x00ff88, 0x0088ff, 0xff0055, 0xffff00, 0xff8800];
 
         const playerGroup = new THREE.Group();
         const bodyMat = new THREE.MeshStandardMaterial({ color: 0x00ff88 });
@@ -68,115 +78,151 @@
         sword.position.set(0.4, 0.7, 0.3); sword.rotation.x = Math.PI/3;
         playerGroup.add(body, sword); scene.add(playerGroup);
 
-        function seededRandom(s) { const x = Math.sin(s) * 10000; return x - Math.floor(x); }
-
-        function createArrow(x, y, z, ry) {
-            const a = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.5), new THREE.MeshBasicMaterial({color: 0x0088ff}));
-            a.position.set(x, y, z); a.rotation.y = ry;
-            const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(a.quaternion);
-            a.userData = { v: dir.multiplyScalar(0.8), l: 60 };
-            scene.add(a); arrows.push(a);
+        function createShatter(pos, color) {
+            for (let i = 0; i < 6; i++) {
+                const shard = new THREE.Mesh(geoms[Math.floor(Math.random()*geoms.length)], new THREE.MeshBasicMaterial({color}));
+                shard.scale.set(0.15, 0.15, 0.15); shard.position.copy(pos);
+                shard.userData = { v: new THREE.Vector3((Math.random()-0.5)*0.3, Math.random()*0.3, (Math.random()-0.5)*0.3), life: 30 };
+                scene.add(shard); particles.push(shard);
+            }
         }
 
-        function spawnPickup(x, z) {
+        // Синхронное создание бонуса
+        function spawnBonusSync(id, x, z) {
+            if (bonuses[id]) return;
             const b = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshBasicMaterial({color: 0xffff00}));
-            b.position.set(x, 0.5, z); scene.add(b); bonuses.push(b);
+            b.position.set(x, 0.5, z);
+            scene.add(b);
+            bonuses[id] = b;
         }
 
-        function toggleTheme(dark) {
-            isDark = dark;
-            document.body.classList.toggle('light-mode', !isDark);
-            scene.background.setHex(isDark ? 0x050505 : 0xe0e0e0);
-            ambient.intensity = isDark ? 0.5 : 2.0;
-            grid.material.color.setHex(isDark ? 0x00ff88 : 0xaaaaaa);
+        function hit(id) {
+            const s = shapes[id];
+            if(!s || !s.visible) return;
+            createShatter(s.position, s.material.color);
+            
+            const dropBonus = Math.random() < 0.3; // Шанс выпадения
+            const bx = s.position.x, bz = s.position.z;
+
+            s.visible = false;
+            ch.send({ type: 'broadcast', event: 'h', payload: { sid: id, db: dropBonus, bx, bz } });
+            
+            score++; document.getElementById('score-val').innerText = score;
+            if(dropBonus) spawnBonusSync('b_'+id, bx, bz);
+
+            setTimeout(() => {
+                const nx = (Math.random()-0.5)*MAP_SIZE, nz = (Math.random()-0.5)*MAP_SIZE;
+                s.position.set(nx, 0.5, nz); s.visible = true;
+                ch.send({ type: 'broadcast', event: 'r', payload: { sid: id, nx, nz } });
+            }, RESPAWN_MS);
+        }
+
+        function createArrow(x, y, z, ry, isRemote = false) {
+            const a = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.6), new THREE.MeshBasicMaterial({color: 0x0088ff}));
+            a.position.set(x, y, z); a.rotation.y = ry;
+            a.userData = { v: new THREE.Vector3(0, 0, -0.7).applyQuaternion(a.quaternion), l: 60 };
+            scene.add(a); arrows.push(a);
+            if(!isRemote) ch.send({ type: 'broadcast', event: 'f', payload: { id: myId, x, y, z, r: ry } });
         }
 
         const ch = sb.channel('ninja_sync', { config: { broadcast: { self: true }, presence: { key: myId } } });
         ch.on('presence', { event: 'sync' }, () => {
-            const state = ch.presenceState();
-            isMaster = Object.keys(state).sort()[0] === myId;
-            document.getElementById('online-count').innerText = Object.keys(state).length;
-        })
-        .on('broadcast', { event: 'm' }, ({ payload }) => {
+            document.getElementById('online-count').innerText = Object.keys(ch.presenceState()).length;
+        }).on('broadcast', { event: 'm' }, ({ payload }) => {
             if(payload.id === myId) return;
             if(!others[payload.id]) {
                 others[payload.id] = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.6, 4, 8), new THREE.MeshBasicMaterial({color: 0xff0055}));
                 scene.add(others[payload.id]);
             }
             others[payload.id].position.set(payload.x, 0.6, payload.z); others[payload.id].rotation.y = payload.r;
-        })
-        .on('broadcast', { event: 'f' }, ({ payload }) => { if(payload.id !== myId) createArrow(payload.x, payload.y, payload.z, payload.r); })
-        .on('broadcast', { event: 't' }, ({ payload }) => toggleTheme(payload.dark))
-        .on('broadcast', { event: 'h' }, ({ payload }) => {
-            const s = shapes[payload.sid];
+        }).on('broadcast', { event: 'h' }, ({ payload }) => {
+            const s = shapes[payload.sid]; 
             if(s) { 
-                if(s.userData.isBonus) spawnPickup(s.position.x, s.position.z);
-                s.visible = false; s.position.y = -10; 
+                createShatter(s.position, s.material.color); s.visible = false; 
+                if(payload.db) spawnBonusSync('b_'+payload.sid, payload.bx, payload.bz);
             }
-        })
-        .on('broadcast', { event: 'r' }, ({ payload }) => {
+        }).on('broadcast', { event: 'r' }, ({ payload }) => {
             const s = shapes[payload.sid]; if(s) { s.position.set(payload.nx, 0.5, payload.nz); s.visible = true; }
-        })
-        .subscribe();
+        }).on('broadcast', { event: 'f' }, ({ payload }) => {
+            if(payload.id !== myId) createArrow(payload.x, payload.y, payload.z, payload.r, true);
+        }).on('broadcast', { event: 'pb' }, ({ payload }) => {
+            if(bonuses[payload.bid]) { scene.remove(bonuses[payload.bid]); delete bonuses[payload.bid]; }
+        }).on('broadcast', { event: 't' }, ({ payload }) => toggleTheme(payload.dark)).subscribe();
 
-        function hit(id) {
-            ch.send({ type: 'broadcast', event: 'h', payload: { sid: id } });
-            score++; document.getElementById('score-val').innerText = score;
-            if(isMaster) setTimeout(() => {
-                const nx = (Math.random()-0.5)*MAP_SIZE, nz = (Math.random()-0.5)*MAP_SIZE;
-                ch.send({ type: 'broadcast', event: 'r', payload: { sid: id, nx, nz } });
-            }, 3000);
+        function toggleTheme(dark) {
+            isDark = dark;
+            document.body.classList.toggle('light-mode', !isDark);
+            scene.background.setHex(isDark ? 0x050505 : 0xe0e0e0);
+            grid.material.color.setHex(isDark ? 0x00ff88 : 0xaaaaaa);
         }
 
         document.getElementById('theme-btn').onclick = () => ch.send({ type: 'broadcast', event: 't', payload: { dark: !isDark } });
 
         let joyPos = { x: 0, z: 0 };
         const joy = document.getElementById('joystick'), stick = document.getElementById('stick');
-        joy.ontouchmove = e => {
+        joy.addEventListener('touchmove', e => {
             const r = joy.getBoundingClientRect(), dx = e.touches[0].clientX-(r.left+40), dy = e.touches[0].clientY-(r.top+40), d = Math.min(Math.sqrt(dx*dx+dy*dy), 30);
             joyPos = { x: (dx/30)*(d/30), z: (dy/30)*(d/30) }; stick.style.transform = `translate(${joyPos.x*30}px,${joyPos.z*30}px)`;
-        };
-        joy.ontouchend = () => { joyPos = {x:0,z:0}; stick.style.transform='none'; };
+        });
+        joy.addEventListener('touchend', () => { joyPos = {x:0,z:0}; stick.style.transform='none'; });
 
-        document.getElementById('attack-btn').ontouchstart = e => {
+        document.getElementById('attack-btn').addEventListener('touchstart', e => {
             e.preventDefault(); sword.rotation.z = Math.PI/2;
-            Object.keys(shapes).forEach(id => { if(shapes[id].visible && playerGroup.position.distanceTo(shapes[id].position) < 2) hit(id); });
-            setTimeout(() => sword.rotation.z = 0, 100);
-        };
+            Object.keys(shapes).forEach(id => { if(shapes[id].visible && playerGroup.position.distanceTo(shapes[id].position) < 2.2) hit(id); });
+            setTimeout(() => sword.rotation.z = 0, 120);
+        });
 
-        document.getElementById('bow-btn').ontouchstart = e => {
-            e.preventDefault(); createArrow(playerGroup.position.x, 1.4, playerGroup.position.z, playerGroup.rotation.y);
-            ch.send({ type: 'broadcast', event: 'f', payload: { id: myId, x: playerGroup.position.x, y: 1.4, z: playerGroup.position.z, r: playerGroup.rotation.y } });
-        };
+        document.getElementById('bow-btn').addEventListener('touchstart', e => {
+            e.preventDefault(); createArrow(playerGroup.position.x, 1.3, playerGroup.position.z, playerGroup.rotation.y);
+        });
 
         function initWorld() {
             for(let i=0; i<SHAPE_COUNT; i++) {
-                const id = 's_'+i, cIdx = i % colors.length;
-                const mesh = new THREE.Mesh(geoms[i%3], new THREE.MeshStandardMaterial({ color: colors[cIdx] }));
-                mesh.position.set((seededRandom(i)-0.5)*MAP_SIZE, 0.5, (seededRandom(i+500)-0.5)*MAP_SIZE);
-                mesh.userData = { isBonus: cIdx === 3 }; scene.add(mesh); shapes[id] = mesh;
+                const id = 's_'+i;
+                const gIdx = Math.floor(seededRandom(i) * geoms.length);
+                const cIdx = Math.floor(seededRandom(i + 1) * colors.length);
+                const x = (seededRandom(i + 2) - 0.5) * MAP_SIZE;
+                const z = (seededRandom(i + 3) - 0.5) * MAP_SIZE;
+                const mesh = new THREE.Mesh(geoms[gIdx].clone(), new THREE.MeshStandardMaterial({ color: colors[cIdx] }));
+                mesh.position.set(x, 0.5, z);
+                scene.add(mesh); shapes[id] = mesh;
             }
         }
 
         function loop() {
             requestAnimationFrame(loop);
-            if (speedTimer > 0) {
-                speedTimer--; if (speedTimer <= 0) { moveSpeed = 0.02; bodyMat.emissiveIntensity = 0; document.getElementById('speed-indicator').style.display='none'; }
-            }
+            particles.forEach((p, i) => {
+                p.position.add(p.userData.v); p.userData.v.y -= 0.01; p.userData.life--;
+                if(p.userData.life <= 0) { scene.remove(p); particles.splice(i, 1); }
+            });
 
-            bonuses.forEach((b, i) => {
-                b.rotation.y += 0.1;
-                if(playerGroup.position.distanceTo(b.position) < 1) {
-                    moveSpeed = 0.07; speedTimer = 300; bodyMat.emissive.setHex(0xffff00); bodyMat.emissiveIntensity = 0.5;
-                    document.getElementById('speed-indicator').style.display='block';
-                    scene.remove(b); bonuses.splice(i, 1);
+            // Синхронный сбор бонусов
+            Object.keys(bonuses).forEach(bid => {
+                const b = bonuses[bid]; b.rotation.y += 0.05;
+                if(playerGroup.position.distanceTo(b.position) < 1.2) {
+                    moveSpeed = 0.07; speedTimer = 300; 
+                    bodyMat.emissive.setHex(0xffff00); bodyMat.emissiveIntensity = 0.6;
+                    document.getElementById('speed-indicator').style.display = 'block';
+                    // Удаляем у себя и шлем всем сигнал удаления
+                    scene.remove(b); delete bonuses[bid];
+                    ch.send({ type: 'broadcast', event: 'pb', payload: { bid: bid } });
                 }
             });
+
+            if(speedTimer > 0) {
+                speedTimer--;
+                if(speedTimer <= 0) {
+                    moveSpeed = 0.02; bodyMat.emissiveIntensity = 0;
+                    document.getElementById('speed-indicator').style.display = 'none';
+                }
+            }
 
             arrows.forEach((a, i) => {
                 a.position.add(a.userData.v);
                 if(--a.userData.l <= 0) { scene.remove(a); arrows.splice(i, 1); }
-                else Object.keys(shapes).forEach(id => { if(shapes[id].visible && a.position.distanceTo(shapes[id].position) < 1.2) { hit(id); scene.remove(a); arrows.splice(i,1); } });
+                else Object.keys(shapes).forEach(id => {
+                    if(shapes[id].visible && a.position.distanceTo(shapes[id].position) < 1.2) { hit(id); scene.remove(a); arrows.splice(i, 1); }
+                });
             });
 
             if(joyPos.x || joyPos.z) {
@@ -184,7 +230,7 @@
                 playerGroup.rotation.y = Math.atan2(-joyPos.x, -joyPos.z);
                 ch.send({ type: 'broadcast', event: 'm', payload: { id: myId, x: playerGroup.position.x, z: playerGroup.position.z, r: playerGroup.rotation.y } });
             }
-            camera.position.lerp(new THREE.Vector3(playerGroup.position.x, 12, playerGroup.position.z + 14), 0.1);
+            camera.position.lerp(new THREE.Vector3(playerGroup.position.x, 12, playerGroup.position.z + 15), 0.1);
             camera.lookAt(playerGroup.position); renderer.render(scene, camera);
         }
 
