@@ -161,7 +161,7 @@
         function loop() {
             requestAnimationFrame(loop);
             if (speedTimer > 0) {
-                speedTimer--; if (speedTimer <= 0) { moveSpeed = 0.2; bodyMat.emissiveIntensity = 0; document.getElementById('speed-indicator').style.display='none'; }
+                speedTimer--; if (speedTimer <= 0) { moveSpeed = 0.02; bodyMat.emissiveIntensity = 0; document.getElementById('speed-indicator').style.display='none'; }
             }
 
             bonuses.forEach((b, i) => {
