@@ -5,23 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>NatokinaseNinja3D</title>
     <style>
-        :root { --main: #00ff88; --bg: #050505; --ui-panel: rgba(0,0,0,0.6); }
-        body { margin: 0; overflow: hidden; background: var(--bg); touch-action: none; user-select: none; font-family: sans-serif; transition: background 0.3s; }
+        :root { --main: #00ff88; --bg: #050505; --ui-panel: rgba(0,0,0,0.7); }
+        body { margin: 0; overflow: hidden; background: var(--bg); touch-action: none; user-select: none; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         
         #ui { position: absolute; top: 20px; left: 20px; color: var(--main); pointer-events: none; z-index: 10; }
-        .stats { font-size: 14px; font-weight: bold; background: var(--ui-panel); padding: 12px; border-radius: 8px; border-left: 4px solid var(--main); backdrop-filter: blur(5px); }
+        .stats { font-size: 14px; font-weight: bold; background: var(--ui-panel); padding: 15px; border-radius: 10px; border-left: 5px solid var(--main); backdrop-filter: blur(10px); line-height: 1.6; }
+        .speed-active { color: #ffff00; text-shadow: 0 0 10px #ffff00; }
         
-        #theme-btn { 
-            position: absolute; top: 20px; right: 20px; width: 45px; height: 45px; 
-            background: var(--ui-panel); border: 2px solid var(--main); border-radius: 50%;
-            color: var(--main); display: flex; align-items: center; justify-content: center;
-            cursor: pointer; z-index: 100; pointer-events: auto; font-size: 20px;
-        }
-
         #controls { position: absolute; bottom: 40px; width: 100%; display: flex; justify-content: space-around; align-items: center; pointer-events: none; }
         #joystick { width: 110px; height: 110px; background: rgba(255,255,255,0.05); border: 2px solid var(--main); border-radius: 50%; position: relative; pointer-events: auto; }
-        #stick { width: 40px; height: 40px; background: var(--main); border-radius: 50%; position: absolute; left: 35px; top: 35px; box-shadow: 0 0 15px var(--main); pointer-events: none; }
-        #attack-btn { width: 90px; height: 90px; background: rgba(255, 0, 85, 0.3); border: 3px solid #ff0055; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; pointer-events: auto; text-shadow: 0 0 5px black; }
+        #stick { width: 40px; height: 40px; background: var(--main); border-radius: 50%; position: absolute; left: 35px; top: 35px; box-shadow: 0 0 15px var(--main); }
+        #attack-btn { width: 90px; height: 90px; background: rgba(255, 0, 85, 0.3); border: 3px solid #ff0055; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; pointer-events: auto; text-shadow: 0 0 5px rgba(0,0,0,0.5); }
         #attack-btn:active { transform: scale(0.9); background: rgba(255, 0, 85, 0.6); }
     </style>
 </head>
@@ -29,11 +23,11 @@
 
     <div id="ui">
         <div class="stats">
-            GEO SLASHER MMO<br>
-            ОЧКИ: <span id="score-val">0</span> | ОНЛАЙН: <span id="online-count">1</span>
+            NINJA MMO: SPEED EDITION<br>
+            ОЧКИ: <span id="score-val">0</span> | ОНЛАЙН: <span id="online-count">1</span><br>
+            <span id="speed-status">СКОРОСТЬ: ОБЫЧНАЯ</span>
         </div>
     </div>
-    <div id="theme-btn">🌙</div>
 
     <div id="controls">
         <div id="joystick"><div id="stick"></div></div>
@@ -41,7 +35,6 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    
     <script type="importmap">
         { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
     </script>
@@ -49,90 +42,69 @@
     <script type="module">
         import * as THREE from 'three';
 
-        // --- ДАННЫЕ SUPABASE ---
         const SB_URL = 'https://olicbodhjgfotfgiodfr.supabase.co';
         const SB_KEY = 'sb_publishable_4y90bVcBOvGok71eftoLzw_G6xeP9bn';
         const sb = supabase.createClient(SB_URL, SB_KEY);
 
         const myId = 'p' + Math.floor(Math.random() * 10000);
-        let score = 0;
-        let isDark = true;
-        const others = {};
-        const shapes = {};
+        const shapes = {}, others = {}, bonuses = {};
+        const colors = [0x00ffff, 0xff00ff, 0xffff00, 0x00ff88, 0xff8800, 0xff0055];
+        const MAP_SIZE = 50;
 
-        // --- THREE.JS ОСНОВА ---
+        // Состояние игрока
+        let moveSpeed = 0.15;
+        let speedTimer = null;
+
+        // --- THREE.JS ---
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x050505);
-        scene.fog = new THREE.Fog(0x050505, 5, 45);
-        
+        scene.fog = new THREE.Fog(0x050505, 10, 60);
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setPixelRatio(window.devicePixelRatio);
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-        scene.add(ambientLight);
-        const sun = new THREE.PointLight(0xffffff, 100, 100);
-        sun.position.set(0, 15, 5);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+        const sun = new THREE.PointLight(0x00ff88, 200, 100);
+        sun.position.set(0, 20, 0);
         scene.add(sun);
 
-        const grid = new THREE.GridHelper(100, 50, 0x00ff88, 0x222222);
+        const grid = new THREE.GridHelper(120, 60, 0x00ff88, 0x111111);
         scene.add(grid);
 
-        // --- ИГРОК ---
+        // --- ПЕРСОНАЖ ---
         const playerGroup = new THREE.Group();
-        const playerBody = new THREE.Mesh(
-            new THREE.CapsuleGeometry(0.3, 0.7, 4, 10), 
-            new THREE.MeshStandardMaterial({ color: 0x00ff88 })
-        );
-        playerBody.position.y = 0.65;
-        playerGroup.add(playerBody);
-
-        const sword = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.02, 0.04, 1.2), 
-            new THREE.MeshBasicMaterial({ color: 0xffffff })
-        );
-        sword.position.set(0.4, 1.1, 0.4);
-        sword.rotation.x = Math.PI/4;
+        const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.7, 4, 10), new THREE.MeshStandardMaterial({ color: 0x00ff88 }));
+        body.position.y = 0.65;
+        playerGroup.add(body);
+        const sword = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.04, 1.2), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+        sword.position.set(0.4, 1.1, 0.4); sword.rotation.x = Math.PI/4;
         playerGroup.add(sword);
         scene.add(playerGroup);
 
-        // --- СИНХРОННЫЕ ФИГУРЫ ---
-        function getSyncPos(i) {
-            return { x: Math.sin(i * 12.9) * 15, z: Math.cos(i * 78.2) * 15 };
-        }
-
-        function spawn(id, i) {
-            const pos = getSyncPos(i);
-            const mesh = new THREE.Mesh(
-                new THREE.IcosahedronGeometry(0.5), 
-                new THREE.MeshStandardMaterial({ color: 0x00ffff, wireframe: true })
-            );
-            mesh.position.set(pos.x, 0.6, pos.z);
+        // --- ЛОГИКА ОБЪЕКТОВ ---
+        function createShape(id, x, z, colorIdx) {
+            if (shapes[id]) scene.remove(shapes[id]);
+            const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(0.6), new THREE.MeshStandardMaterial({ color: colors[colorIdx], emissive: colors[colorIdx], emissiveIntensity: 0.5 }));
+            mesh.position.set(x, 0.6, z);
             scene.add(mesh);
             shapes[id] = mesh;
         }
 
-        for(let i=0; i<20; i++) spawn('s_'+i, i);
-
-        function killShape(id) {
-            if(shapes[id]) {
-                scene.remove(shapes[id]);
-                delete shapes[id];
-                const idx = parseInt(id.split('_')[1]);
-                setTimeout(() => { if(!shapes[id]) spawn(id, idx); }, 4000);
-            }
+        function createBonus(id, x, z) {
+            const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 16), new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0xffff00, emissiveIntensity: 1 }));
+            mesh.position.set(x, 0.5, z);
+            scene.add(mesh);
+            bonuses[id] = mesh;
         }
 
-        // --- SUPABASE REALTIME ---
-        const channel = sb.channel('game_sync', { config: { broadcast: { self: false }, presence: { key: myId } } });
+        // Спавн 40 фигур
+        for(let i=0; i<40; i++) createShape('s_'+i, Math.cos(i)*20, Math.sin(i)*20, i % colors.length);
 
+        // --- СЕТЬ ---
+        const channel = sb.channel('game_v2', { config: { broadcast: { self: false }, presence: { key: myId } } });
         channel
-            .on('presence', { event: 'sync' }, () => {
-                const state = channel.presenceState();
-                document.getElementById('online-count').innerText = Object.keys(state).length;
-            })
+            .on('presence', { event: 'sync' }, () => { document.getElementById('online-count').innerText = Object.keys(channel.presenceState()).length; })
             .on('broadcast', { event: 'move' }, ({ payload }) => {
                 if(!others[payload.id]) {
                     others[payload.id] = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.7, 4, 8), new THREE.MeshStandardMaterial({color: 0xff0055}));
@@ -142,107 +114,110 @@
                 others[payload.id].rotation.y = payload.r;
             })
             .on('broadcast', { event: 'hit' }, ({ payload }) => {
-                killShape(payload.sid);
+                if (shapes[payload.sid]) {
+                    scene.remove(shapes[payload.sid]); delete shapes[payload.sid];
+                    if (payload.bonus) createBonus('b_'+payload.sid, payload.ox, payload.oz);
+                    setTimeout(() => createShape(payload.sid, payload.nx, payload.nz, payload.nc), 3000);
+                }
+            })
+            .on('broadcast', { event: 'get_bonus' }, ({ payload }) => {
+                if (bonuses[payload.bid]) { scene.remove(bonuses[payload.bid]); delete bonuses[payload.bid]; }
             })
             .subscribe();
 
-        // --- КНОПКА ТЕМЫ ---
-        document.getElementById('theme-btn').addEventListener('click', () => {
-            isDark = !isDark;
-            const c = isDark ? 0x050505 : 0xeeeeee;
-            scene.background.set(c);
-            scene.fog.color.set(c);
-            grid.material.color.set(isDark ? 0x00ff88 : 0x999999);
-            document.getElementById('theme-btn').innerText = isDark ? "🌙" : "☀️";
-            document.documentElement.style.setProperty('--bg', isDark ? '#050505' : '#eeeeee');
-            document.documentElement.style.setProperty('--main', isDark ? '#00ff88' : '#333333');
-        });
-
         // --- УПРАВЛЕНИЕ ---
-        let moveDir = { x: 0, z: 0 };
-        let isAttacking = false;
-        let attackTime = 0;
+        let moveDir = { x: 0, z: 0 }, isAttacking = false, attackTime = 0, score = 0;
 
-        const attackBtn = document.getElementById('attack-btn');
-        const stick = document.getElementById('stick');
-        const joystick = document.getElementById('joystick');
+        function activateSpeed() {
+            moveSpeed = 0.35;
+            document.getElementById('speed-status').innerText = "СКОРОСТЬ: ПРЕДЕЛЬНАЯ!";
+            document.getElementById('speed-status').className = "speed-active";
+            if(speedTimer) clearTimeout(speedTimer);
+            speedTimer = setTimeout(() => {
+                moveSpeed = 0.15;
+                document.getElementById('speed-status').innerText = "СКОРОСТЬ: ОБЫЧНАЯ";
+                document.getElementById('speed-status').className = "";
+            }, 5000);
+        }
 
         function doAttack() {
             if(isAttacking) return;
-            isAttacking = true;
-            attackTime = Date.now();
-            
+            isAttacking = true; attackTime = Date.now();
             Object.keys(shapes).forEach(id => {
-                if(playerGroup.position.distanceTo(shapes[id].position) < 2.2) {
-                    killShape(id);
-                    score++;
-                    document.getElementById('score-val').innerText = score;
-                    channel.send({ type: 'broadcast', event: 'hit', payload: { sid: id } });
-                    sb.from('players').upsert({ id: myId, score: score }).then();
+                if(playerGroup.position.distanceTo(shapes[id].position) < 2.5) {
+                    const nx = (Math.random()-0.5)*MAP_SIZE, nz = (Math.random()-0.5)*MAP_SIZE, nc = Math.floor(Math.random()*colors.length);
+                    const hasBonus = Math.random() < 0.2; // 20% шанс бонуса
+                    const oldPos = shapes[id].position.clone();
+
+                    // Локальное удаление
+                    scene.remove(shapes[id]); delete shapes[id];
+                    if(hasBonus) createBonus('b_'+id, oldPos.x, oldPos.z);
+                    setTimeout(() => createShape(id, nx, nz, nc), 3000);
+                    
+                    score++; document.getElementById('score-val').innerText = score;
+                    channel.send({ type: 'broadcast', event: 'hit', payload: { sid: id, nx, nz, nc, ox: oldPos.x, oz: oldPos.z, bonus: hasBonus } });
                 }
             });
-            setTimeout(() => { isAttacking = false; }, 300);
+            setTimeout(() => isAttacking = false, 300);
         }
 
-        attackBtn.addEventListener('touchstart', (e) => { e.preventDefault(); doAttack(); });
-        attackBtn.addEventListener('mousedown', doAttack);
-
+        // Джойстик
+        const joystick = document.getElementById('joystick');
+        const stick = document.getElementById('stick');
         joystick.addEventListener('touchmove', (e) => {
-            const t = e.touches[0];
             const r = joystick.getBoundingClientRect();
-            const cx = r.left + r.width/2;
-            const cy = r.top + r.height/2;
-            const dx = t.clientX - cx;
-            const dy = t.clientY - cy;
+            const dx = e.touches[0].clientX - (r.left + r.width/2);
+            const dy = e.touches[0].clientY - (r.top + r.height/2);
             const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 40);
             const ang = Math.atan2(dy, dx);
-            
             moveDir.x = Math.cos(ang) * (dist / 40);
             moveDir.z = Math.sin(ang) * (dist / 40);
             stick.style.transform = `translate(${moveDir.x * 40}px, ${moveDir.z * 40}px)`;
         });
+        joystick.addEventListener('touchend', () => { moveDir = {x:0, z:0}; stick.style.transform = `translate(0,0)`; });
+        document.getElementById('attack-btn').addEventListener('touchstart', (e) => { e.preventDefault(); doAttack(); });
 
-        const stopMove = () => { moveDir = { x: 0, z: 0 }; stick.style.transform = `translate(0,0)`; };
-        joystick.addEventListener('touchend', stopMove);
-        joystick.addEventListener('touchcancel', stopMove);
-
-        // --- ЦИКЛ ---
+        // --- ГЕЙМЛУП ---
         function animate() {
             requestAnimationFrame(animate);
-
             if(moveDir.x !== 0 || moveDir.z !== 0) {
-                playerGroup.position.x += moveDir.x * 0.12;
-                playerGroup.position.z += moveDir.z * 0.12;
+                playerGroup.position.x += moveDir.x * moveSpeed;
+                playerGroup.position.z += moveDir.z * moveSpeed;
                 playerGroup.rotation.y = Math.atan2(-moveDir.x, -moveDir.z);
-                
-                channel.send({
-                    type: 'broadcast',
-                    event: 'move',
-                    payload: { id: myId, x: playerGroup.position.x, z: playerGroup.position.z, r: playerGroup.rotation.y }
-                });
+                channel.send({ type: 'broadcast', event: 'move', payload: { id: myId, x: playerGroup.position.x, z: playerGroup.position.z, r: playerGroup.rotation.y } });
             }
 
+            // Проверка сбора бонусов
+            Object.keys(bonuses).forEach(id => {
+                if(playerGroup.position.distanceTo(bonuses[id].position) < 1.5) {
+                    scene.remove(bonuses[id]); delete bonuses[id];
+                    activateSpeed();
+                    channel.send({ type: 'broadcast', event: 'get_bonus', payload: { bid: id } });
+                } else {
+                    bonuses[id].rotation.y += 0.1; // Кручение бонуса
+                    bonuses[id].position.y = 0.5 + Math.sin(Date.now()*0.005)*0.2; // Прыганье бонуса
+                }
+            });
+
+            Object.values(shapes).forEach(s => { s.rotation.y += 0.03; });
             if(isAttacking) {
                 const p = (Date.now() - attackTime) / 300;
-                sword.position.y = 1.1 - p * 1.5;
-                sword.rotation.x = Math.PI/4 + p * Math.PI;
+                sword.position.y = 1.1 - p * 1.5; sword.rotation.x = Math.PI/4 + p * Math.PI;
             } else {
-                sword.position.set(0.4, 1.1, 0.4);
-                sword.rotation.set(Math.PI/4, 0, 0);
+                sword.position.set(0.4, 1.1, 0.4); sword.rotation.set(Math.PI/4, 0, 0);
             }
 
-            camera.position.lerp(new THREE.Vector3(playerGroup.position.x, 7, playerGroup.position.z + 10), 0.1);
+            camera.position.lerp(new THREE.Vector3(playerGroup.position.x, 10, playerGroup.position.z + 15), 0.1);
             camera.lookAt(playerGroup.position);
             renderer.render(scene, camera);
         }
+        animate();
 
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
-
-        animate();
     </script>
 <script src="https://dmamax.netlify.app/legal-module.js"></script>
 
