@@ -5,29 +5,38 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>NatokinaseNinja3D</title>
     <style>
-        :root { --main: #00ff88; --bg: #050505; --ui-panel: rgba(0,0,0,0.7); }
-        body { margin: 0; overflow: hidden; background: var(--bg); touch-action: none; user-select: none; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        :root { --main: #00ff88; --bg: #050505; --ui-panel: rgba(0,0,0,0.8); }
+        body { margin: 0; overflow: hidden; background: var(--bg); touch-action: none; user-select: none; font-family: sans-serif; transition: background 0.3s; }
         
         #ui { position: absolute; top: 20px; left: 20px; color: var(--main); pointer-events: none; z-index: 10; }
-        .stats { font-size: 14px; font-weight: bold; background: var(--ui-panel); padding: 15px; border-radius: 10px; border-left: 5px solid var(--main); backdrop-filter: blur(10px); line-height: 1.6; }
-        .speed-active { color: #ffff00; text-shadow: 0 0 10px #ffff00; }
+        .stats { font-size: 14px; font-weight: bold; background: var(--ui-panel); padding: 15px; border-radius: 10px; border: 1px solid var(--main); backdrop-filter: blur(10px); }
         
+        /* Кнопка темы */
+        #theme-toggle {
+            position: absolute; top: 20px; right: 20px; width: 50px; height: 50px;
+            background: var(--ui-panel); border: 2px solid var(--main); border-radius: 50%;
+            color: var(--main); display: flex; align-items: center; justify-content: center;
+            cursor: pointer; pointer-events: auto; z-index: 100; font-size: 24px; box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+
         #controls { position: absolute; bottom: 40px; width: 100%; display: flex; justify-content: space-around; align-items: center; pointer-events: none; }
         #joystick { width: 110px; height: 110px; background: rgba(255,255,255,0.05); border: 2px solid var(--main); border-radius: 50%; position: relative; pointer-events: auto; }
         #stick { width: 40px; height: 40px; background: var(--main); border-radius: 50%; position: absolute; left: 35px; top: 35px; box-shadow: 0 0 15px var(--main); }
-        #attack-btn { width: 90px; height: 90px; background: rgba(255, 0, 85, 0.3); border: 3px solid #ff0055; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; pointer-events: auto; text-shadow: 0 0 5px rgba(0,0,0,0.5); }
-        #attack-btn:active { transform: scale(0.9); background: rgba(255, 0, 85, 0.6); }
+        #attack-btn { width: 90px; height: 90px; background: rgba(255, 0, 85, 0.3); border: 3px solid #ff0055; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; pointer-events: auto; }
+        #role-tag { font-size: 10px; opacity: 0.6; display: block; margin-top: 5px; }
     </style>
 </head>
 <body>
 
     <div id="ui">
         <div class="stats">
-            NINJA MMO: SPEED EDITION<br>
-            ОЧКИ: <span id="score-val">0</span> | ОНЛАЙН: <span id="online-count">1</span><br>
-            <span id="speed-status">СКОРОСТЬ: ОБЫЧНАЯ</span>
+            GLOBAL SYNC MMO<br>
+            ОЧКИ: <span id="score-val">0</span> | ОНЛАЙН: <span id="online-count">1</span>
+            <span id="role-tag">Загрузка мира...</span>
         </div>
     </div>
+
+    <div id="theme-toggle">🌙</div>
 
     <div id="controls">
         <div id="joystick"><div id="stick"></div></div>
@@ -35,9 +44,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script type="importmap">
-        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
-    </script>
+    <script type="importmap"> { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } } </script>
 
     <script type="module">
         import * as THREE from 'three';
@@ -49,30 +56,27 @@
         const myId = 'p' + Math.floor(Math.random() * 10000);
         const shapes = {}, others = {}, bonuses = {};
         const colors = [0x00ffff, 0xff00ff, 0xffff00, 0x00ff88, 0xff8800, 0xff0055];
-        const MAP_SIZE = 50;
+        const MAP_SIZE = 60;
+        let isMaster = false;
+        let isDarkMode = true;
 
-        // Состояние игрока
-        let moveSpeed = 0.15;
-        let speedTimer = null;
-
-        // --- THREE.JS ---
+        // --- ТРЕХМЕРНЫЙ МИР ---
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x050505);
         scene.fog = new THREE.Fog(0x050505, 10, 60);
+
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-        const sun = new THREE.PointLight(0x00ff88, 200, 100);
-        sun.position.set(0, 20, 0);
-        scene.add(sun);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
 
-        const grid = new THREE.GridHelper(120, 60, 0x00ff88, 0x111111);
+        const grid = new THREE.GridHelper(200, 80, 0x00ff88, 0x111111);
         scene.add(grid);
 
-        // --- ПЕРСОНАЖ ---
+        // Игрок
         const playerGroup = new THREE.Group();
         const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.7, 4, 10), new THREE.MeshStandardMaterial({ color: 0x00ff88 }));
         body.position.y = 0.65;
@@ -82,29 +86,59 @@
         playerGroup.add(sword);
         scene.add(playerGroup);
 
-        // --- ЛОГИКА ОБЪЕКТОВ ---
-        function createShape(id, x, z, colorIdx) {
-            if (shapes[id]) scene.remove(shapes[id]);
-            const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(0.6), new THREE.MeshStandardMaterial({ color: colors[colorIdx], emissive: colors[colorIdx], emissiveIntensity: 0.5 }));
+        // --- ЛОГИКА ТЕМЫ ---
+        const themeBtn = document.getElementById('theme-toggle');
+        themeBtn.onclick = () => {
+            isDarkMode = !isDarkMode;
+            themeBtn.innerText = isDarkMode ? "🌙" : "☀️";
+            
+            const bgColor = isDarkMode ? 0x050505 : 0xeeeeee;
+            const gridColor = isDarkMode ? 0x00ff88 : 0x444444;
+            const gridFade = isDarkMode ? 0x111111 : 0xcccccc;
+
+            scene.background.set(bgColor);
+            scene.fog.color.set(bgColor);
+            grid.material.color.set(gridColor);
+            grid.material.opacity = isDarkMode ? 0.2 : 0.5;
+
+            document.documentElement.style.setProperty('--bg', isDarkMode ? '#050505' : '#eeeeee');
+            document.documentElement.style.setProperty('--main', isDarkMode ? '#00ff88' : '#222222');
+            document.documentElement.style.setProperty('--ui-panel', isDarkMode ? 'rgba(0,0,0,0.8)' : 'rgba(255,255,255,0.8)');
+        };
+
+        // --- СИНХРОНИЗАЦИЯ ---
+        function seededRandom(seed) {
+            const x = Math.sin(seed) * 10000;
+            return x - Math.floor(x);
+        }
+
+        function spawnShape(id, x, z, cIdx) {
+            if(shapes[id]) scene.remove(shapes[id]);
+            const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(0.6), new THREE.MeshStandardMaterial({ 
+                color: colors[cIdx], emissive: colors[cIdx], emissiveIntensity: 0.4 
+            }));
             mesh.position.set(x, 0.6, z);
             scene.add(mesh);
             shapes[id] = mesh;
         }
 
-        function createBonus(id, x, z) {
-            const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 16), new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0xffff00, emissiveIntensity: 1 }));
-            mesh.position.set(x, 0.5, z);
-            scene.add(mesh);
-            bonuses[id] = mesh;
+        // Генерация мира при старте
+        for(let i=0; i<40; i++) {
+            const x = (seededRandom(i+1)-0.5)*MAP_SIZE;
+            const z = (seededRandom(i+2)-0.5)*MAP_SIZE;
+            spawnShape('s_'+i, x, z, i % colors.length);
         }
 
-        // Спавн 40 фигур
-        for(let i=0; i<40; i++) createShape('s_'+i, Math.cos(i)*20, Math.sin(i)*20, i % colors.length);
+        const channel = sb.channel('mc_sync_final', { config: { broadcast: { self: false }, presence: { key: myId } } });
 
-        // --- СЕТЬ ---
-        const channel = sb.channel('game_v2', { config: { broadcast: { self: false }, presence: { key: myId } } });
         channel
-            .on('presence', { event: 'sync' }, () => { document.getElementById('online-count').innerText = Object.keys(channel.presenceState()).length; })
+            .on('presence', { event: 'sync' }, () => {
+                const state = channel.presenceState();
+                const presences = Object.keys(state).sort();
+                document.getElementById('online-count').innerText = presences.length;
+                isMaster = (presences[0] === myId);
+                document.getElementById('role-tag').innerText = isMaster ? "Хост мира" : "Синхронизация с хостом";
+            })
             .on('broadcast', { event: 'move' }, ({ payload }) => {
                 if(!others[payload.id]) {
                     others[payload.id] = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.7, 4, 8), new THREE.MeshStandardMaterial({color: 0xff0055}));
@@ -113,57 +147,44 @@
                 others[payload.id].position.set(payload.x, 0.65, payload.z);
                 others[payload.id].rotation.y = payload.r;
             })
-            .on('broadcast', { event: 'hit' }, ({ payload }) => {
-                if (shapes[payload.sid]) {
-                    scene.remove(shapes[payload.sid]); delete shapes[payload.sid];
-                    if (payload.bonus) createBonus('b_'+payload.sid, payload.ox, payload.oz);
-                    setTimeout(() => createShape(payload.sid, payload.nx, payload.nz, payload.nc), 3000);
+            .on('broadcast', { event: 'world_event' }, ({ payload }) => {
+                if(payload.type === 'hit') {
+                    if(shapes[payload.sid]) { scene.remove(shapes[payload.sid]); delete shapes[payload.sid]; }
                 }
-            })
-            .on('broadcast', { event: 'get_bonus' }, ({ payload }) => {
-                if (bonuses[payload.bid]) { scene.remove(bonuses[payload.bid]); delete bonuses[payload.bid]; }
+                if(payload.type === 'respawn') {
+                    spawnShape(payload.sid, payload.nx, payload.nz, payload.nc);
+                }
             })
             .subscribe();
 
-        // --- УПРАВЛЕНИЕ ---
-        let moveDir = { x: 0, z: 0 }, isAttacking = false, attackTime = 0, score = 0;
-
-        function activateSpeed() {
-            moveSpeed = 0.35;
-            document.getElementById('speed-status').innerText = "СКОРОСТЬ: ПРЕДЕЛЬНАЯ!";
-            document.getElementById('speed-status').className = "speed-active";
-            if(speedTimer) clearTimeout(speedTimer);
-            speedTimer = setTimeout(() => {
-                moveSpeed = 0.15;
-                document.getElementById('speed-status').innerText = "СКОРОСТЬ: ОБЫЧНАЯ";
-                document.getElementById('speed-status').className = "";
-            }, 5000);
-        }
+        // --- УПРАВЛЕНИЕ И ГЕЙМПЛЕЙ ---
+        let moveDir = { x: 0, z: 0 }, moveSpeed = 0.15, isAttacking = false, attackTime = 0, score = 0;
 
         function doAttack() {
             if(isAttacking) return;
             isAttacking = true; attackTime = Date.now();
+
             Object.keys(shapes).forEach(id => {
                 if(playerGroup.position.distanceTo(shapes[id].position) < 2.5) {
-                    const nx = (Math.random()-0.5)*MAP_SIZE, nz = (Math.random()-0.5)*MAP_SIZE, nc = Math.floor(Math.random()*colors.length);
-                    const hasBonus = Math.random() < 0.2; // 20% шанс бонуса
-                    const oldPos = shapes[id].position.clone();
-
-                    // Локальное удаление
+                    channel.send({ type: 'broadcast', event: 'world_event', payload: { type: 'hit', sid: id } });
                     scene.remove(shapes[id]); delete shapes[id];
-                    if(hasBonus) createBonus('b_'+id, oldPos.x, oldPos.z);
-                    setTimeout(() => createShape(id, nx, nz, nc), 3000);
-                    
                     score++; document.getElementById('score-val').innerText = score;
-                    channel.send({ type: 'broadcast', event: 'hit', payload: { sid: id, nx, nz, nc, ox: oldPos.x, oz: oldPos.z, bonus: hasBonus } });
+
+                    if(isMaster) {
+                        setTimeout(() => {
+                            const nx = (Math.random()-0.5)*MAP_SIZE;
+                            const nz = (Math.random()-0.5)*MAP_SIZE;
+                            const nc = Math.floor(Math.random()*colors.length);
+                            channel.send({ type: 'broadcast', event: 'world_event', payload: { type: 'respawn', sid: id, nx, nz, nc } });
+                            spawnShape(id, nx, nz, nc);
+                        }, 4000);
+                    }
                 }
             });
             setTimeout(() => isAttacking = false, 300);
         }
 
-        // Джойстик
-        const joystick = document.getElementById('joystick');
-        const stick = document.getElementById('stick');
+        const joystick = document.getElementById('joystick'), stick = document.getElementById('stick');
         joystick.addEventListener('touchmove', (e) => {
             const r = joystick.getBoundingClientRect();
             const dx = e.touches[0].clientX - (r.left + r.width/2);
@@ -177,7 +198,6 @@
         joystick.addEventListener('touchend', () => { moveDir = {x:0, z:0}; stick.style.transform = `translate(0,0)`; });
         document.getElementById('attack-btn').addEventListener('touchstart', (e) => { e.preventDefault(); doAttack(); });
 
-        // --- ГЕЙМЛУП ---
         function animate() {
             requestAnimationFrame(animate);
             if(moveDir.x !== 0 || moveDir.z !== 0) {
@@ -187,19 +207,6 @@
                 channel.send({ type: 'broadcast', event: 'move', payload: { id: myId, x: playerGroup.position.x, z: playerGroup.position.z, r: playerGroup.rotation.y } });
             }
 
-            // Проверка сбора бонусов
-            Object.keys(bonuses).forEach(id => {
-                if(playerGroup.position.distanceTo(bonuses[id].position) < 1.5) {
-                    scene.remove(bonuses[id]); delete bonuses[id];
-                    activateSpeed();
-                    channel.send({ type: 'broadcast', event: 'get_bonus', payload: { bid: id } });
-                } else {
-                    bonuses[id].rotation.y += 0.1; // Кручение бонуса
-                    bonuses[id].position.y = 0.5 + Math.sin(Date.now()*0.005)*0.2; // Прыганье бонуса
-                }
-            });
-
-            Object.values(shapes).forEach(s => { s.rotation.y += 0.03; });
             if(isAttacking) {
                 const p = (Date.now() - attackTime) / 300;
                 sword.position.y = 1.1 - p * 1.5; sword.rotation.x = Math.PI/4 + p * Math.PI;
@@ -207,15 +214,13 @@
                 sword.position.set(0.4, 1.1, 0.4); sword.rotation.set(Math.PI/4, 0, 0);
             }
 
-            camera.position.lerp(new THREE.Vector3(playerGroup.position.x, 10, playerGroup.position.z + 15), 0.1);
+            camera.position.lerp(new THREE.Vector3(playerGroup.position.x, 12, playerGroup.position.z + 18), 0.1);
             camera.lookAt(playerGroup.position);
             renderer.render(scene, camera);
         }
         animate();
-
         window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
+            camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
     </script>
