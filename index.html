@@ -46,7 +46,7 @@
         const SB_URL = 'https://olicbodhjgfotfgiodfr.supabase.co', SB_KEY = 'sb_publishable_4y90bVcBOvGok71eftoLzw_G6xeP9bn';
         const sb = supabase.createClient(SB_URL, SB_KEY), myId = 'p' + Math.floor(Math.random() * 1000);
 
-        let isMaster = false, score = 0, moveSpeed = 0.2, speedTimer = 0, isDark = true;
+        let isMaster = false, score = 0, moveSpeed = 0.1, speedTimer = 0, isDark = true;
         const shapes = {}, others = {}, arrows = [], bonuses = [];
 
         const scene = new THREE.Scene(); scene.background = new THREE.Color(0x050505);
