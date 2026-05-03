@@ -12,18 +12,19 @@
         .stats { font-size: 14px; font-weight: bold; background: var(--ui-panel); padding: 15px; border-radius: 12px; border: 2px solid var(--main); backdrop-filter: blur(10px); }
         
         #top-right { position: absolute; top: 20px; right: 20px; display: flex; flex-direction: column; gap: 10px; pointer-events: auto; z-index: 20; }
-        .circle-btn { width: 50px; height: 50px; background: var(--ui-panel); border: 2px solid var(--main); border-radius: 50%; color: var(--main); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 20px; }
+        .circle-btn { width: 50px; height: 50px; background: var(--ui-panel); border: 2px solid var(--main); border-radius: 50%; color: var(--main); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 20px; transition: 0.3s; }
+        .circle-btn:hover { background: var(--main); color: #000; }
 
         #spawn-panel { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: var(--ui-panel); padding: 10px; border-radius: 20px; border: 2px solid var(--main); display: flex; gap: 8px; align-items: center; pointer-events: auto; z-index: 25; }
         select { background: #000; color: var(--main); border: 1px solid var(--main); border-radius: 5px; padding: 5px; font-size: 12px; outline: none; }
         #spawn-btn { background: var(--main); color: #000; border: none; padding: 8px 12px; border-radius: 10px; font-weight: bold; cursor: pointer; }
 
-        #controls { position: absolute; bottom: 30px; width: 100%; display: flex; justify-content: space-around; align-items: flex-end; pointer-events: none; padding: 0 20px; box-sizing: border-box; }
+        #controls { position: absolute; bottom: 30px; width: 100%; display: flex; justify-content: space-around; align-items: flex-end; pointer-events: none; padding: 0 20px; box-sizing: border-box; transition: opacity 0.5s; }
         #joystick { width: 110px; height: 110px; background: rgba(255,255,255,0.05); border: 2px solid var(--main); border-radius: 50%; position: relative; pointer-events: auto; }
         #stick { width: 40px; height: 40px; background: var(--main); border-radius: 50%; position: absolute; left: 35px; top: 35px; box-shadow: 0 0 15px var(--main); pointer-events: none; }
         
         .action-btns { display: flex; flex-direction: column; gap: 15px; pointer-events: none; }
-        .btn { width: 75px; height: 75px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; pointer-events: auto; border: 3px solid; transition: 0.1s; -webkit-tap-highlight-color: transparent; }
+        .btn { width: 75px; height: 75px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; pointer-events: auto; border: 3px solid; transition: 0.1s; -webkit-tap-highlight-color: transparent; cursor: pointer; }
         #sword-btn { background: rgba(0, 255, 136, 0.2); border-color: #00ff88; }
         #bow-btn { background: rgba(0, 200, 255, 0.2); border-color: #00c8ff; }
         #speed-tag { color: #ffeb3b; display: none; font-size: 12px; margin-top: 5px; animation: blink 1s infinite; }
@@ -55,6 +56,7 @@
     </div>
 
     <div id="top-right">
+        <div id="pc-toggle-btn" class="circle-btn" title="Режим ПК">⌨️</div>
         <div id="view-btn" class="circle-btn">👁️❒</div>
         <div id="theme-btn" class="circle-btn">🌌</div>
     </div>
@@ -82,6 +84,10 @@
         const MAP_SIZE = 60;
         let score = 0, moveSpeed = 0.18, isFirstPerson = false;
         let moveDir = { x: 0, z: 0 }, joyTouchId = null;
+        
+        // ПК управление переменные
+        const keys = { w: false, a: false, s: false, d: false };
+        let isPcMode = false;
 
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x87ceeb);
@@ -110,7 +116,7 @@
         player.add(bowModel);
         scene.add(player);
 
-        // --- Логика генерации (Одинаковая для всех) ---
+        // --- Логика генерации ---
         function seededRandom(s) {
             return function() { s = Math.sin(s) * 10000; return s - Math.floor(s); };
         }
@@ -165,6 +171,27 @@
             scene.add(arrow); arrows.push(arrow);
         }
 
+        // --- Атаки (Вынесены в функции) ---
+        function performSwordAttack() {
+            sword.rotation.x = -Math.PI/2; setTimeout(() => sword.rotation.x = -Math.PI/4, 150);
+            Object.keys(shapes).forEach(id => {
+                if(player.position.distanceTo(shapes[id].position) < 2.5) {
+                    const pos = shapes[id].position.clone();
+                    scene.remove(shapes[id]); delete shapes[id];
+                    score += 10; document.getElementById('score-val').innerText = score;
+                    channel.publish('hit', { sid: id });
+                    if(Math.random() < 0.3) createBonus('b'+Math.random(), pos, true);
+                }
+            });
+        }
+
+        function performBowAttack() {
+            bowModel.rotation.x = -0.6; setTimeout(() => bowModel.rotation.x = 0, 200);
+            const aDir = new THREE.Vector3(0,0,-1).applyQuaternion(player.quaternion);
+            spawnArrow(player.position.clone().setY(0.7), new THREE.Euler(Math.PI/2, player.rotation.y, 0, 'YXZ'), aDir);
+            channel.publish('fire', { id: myId, x: player.position.x, z: player.position.z, r: player.rotation.y });
+        }
+
         // --- События Ably ---
         channel.subscribe('spawn', m => createObject(m.data.id, m.data.type, m.data.style, m.data.pos, m.data.color));
         channel.subscribe('bonus_spawn', m => createBonus(m.data.id, m.data.pos));
@@ -198,38 +225,22 @@
             others[m.data.id].rotation.y = m.data.r;
         });
 
-        // --- Управление (Мультитач) ---
-        const joystick = document.getElementById('joystick'), stick = document.getElementById('stick');
+        // --- Управление (Мультитач + ПК) ---
         
+        // Кнопки действий
+        document.getElementById('sword-btn').onclick = (e) => { e.stopPropagation(); performSwordAttack(); };
+        document.getElementById('bow-btn').onclick = (e) => { e.stopPropagation(); performBowAttack(); };
+
+        // Мобильный джойстик
+        const joystick = document.getElementById('joystick'), stick = document.getElementById('stick');
         window.addEventListener('touchstart', e => {
             for(let t of e.changedTouches) {
                 const r = joystick.getBoundingClientRect();
                 if(t.clientX > r.left && t.clientX < r.right && t.clientY > r.top && t.clientY < r.bottom && joyTouchId === null) {
                     joyTouchId = t.identifier;
-                } else {
-                    const btn = document.elementFromPoint(t.clientX, t.clientY);
-                    if(btn?.id === 'bow-btn') {
-                        bowModel.rotation.x = -0.6; setTimeout(() => bowModel.rotation.x = 0, 200);
-                        const aDir = new THREE.Vector3(0,0,-1).applyQuaternion(player.quaternion);
-                        spawnArrow(player.position.clone().setY(0.7), new THREE.Euler(Math.PI/2, player.rotation.y, 0, 'YXZ'), aDir);
-                        channel.publish('fire', { id: myId, x: player.position.x, z: player.position.z, r: player.rotation.y });
-                    }
-                    if(btn?.id === 'sword-btn') {
-                        sword.rotation.x = -Math.PI/2; setTimeout(() => sword.rotation.x = -Math.PI/4, 150);
-                        Object.keys(shapes).forEach(id => {
-                            if(player.position.distanceTo(shapes[id].position) < 2.5) {
-                                const pos = shapes[id].position.clone();
-                                scene.remove(shapes[id]); delete shapes[id];
-                                score += 10; document.getElementById('score-val').innerText = score;
-                                channel.publish('hit', { sid: id });
-                                if(Math.random() < 0.3) createBonus('b'+Math.random(), pos, true);
-                            }
-                        });
-                    }
                 }
             }
         });
-
         window.addEventListener('touchmove', e => {
             for(let t of e.changedTouches) {
                 if(t.identifier === joyTouchId) {
@@ -241,16 +252,53 @@
                 }
             }
         });
-
         window.addEventListener('touchend', e => {
             for(let t of e.changedTouches) if(t.identifier === joyTouchId) { joyTouchId = null; moveDir = {x:0, z:0}; stick.style.transform = 'none'; }
         });
 
+        // ПК Управление (Keyboard)
+        window.addEventListener('keydown', (e) => {
+            const k = e.key.toLowerCase();
+            if(k in keys) keys[k] = true;
+            if(e.code === 'Space') performSwordAttack();
+            updateKeyboardMove();
+        });
+        window.addEventListener('keyup', (e) => {
+            const k = e.key.toLowerCase();
+            if(k in keys) keys[k] = false;
+            updateKeyboardMove();
+        });
+        function updateKeyboardMove() {
+            if (joyTouchId !== null) return;
+            let x = 0, z = 0;
+            if (keys.w) z -= 1; if (keys.s) z += 1;
+            if (keys.a) x -= 1; if (keys.d) x += 1;
+            const len = Math.sqrt(x*x + z*z);
+            if (len > 0) { moveDir.x = x/len; moveDir.z = z/len; }
+            else { moveDir.x = 0; moveDir.z = 0; }
+        }
+
+        // ПК Управление (Mouse)
+        window.addEventListener('mousedown', (e) => {
+            if (e.target.tagName === 'BUTTON' || e.target.tagName === 'SELECT' || e.target.classList.contains('btn')) return;
+            if (e.button === 0) performSwordAttack(); // ЛКМ
+            if (e.button === 2) performBowAttack();   // ПКМ
+        });
+        window.addEventListener('contextmenu', e => e.preventDefault());
+
+        // Переключатель режима ПК
+        document.getElementById('pc-toggle-btn').onclick = () => {
+            isPcMode = !isPcMode;
+            document.getElementById('controls').style.opacity = isPcMode ? '0' : '1';
+            document.getElementById('controls').style.pointerEvents = isPcMode ? 'none' : 'auto';
+            document.getElementById('pc-toggle-btn').innerText = isPcMode ? '📱' : '⌨️';
+        };
+
+        // Остальные кнопки
         document.getElementById('spawn-btn').onclick = () => {
             const pos = player.position.clone().add(new THREE.Vector3(0, 0.5, -2.5).applyQuaternion(player.quaternion));
             createObject('s'+Math.random(), document.getElementById('shape-select').value, document.getElementById('style-select').value, pos, Math.random()*0xffffff, true);
         };
-
         document.getElementById('view-btn').onclick = () => { isFirstPerson = !isFirstPerson; playerBody.visible = !isFirstPerson; };
         document.getElementById('theme-btn').onclick = () => { scene.background.set(scene.background.getHex() === 0x050505 ? 0x87ceeb : 0x050505); };
 
@@ -299,4 +347,5 @@
 <script src="https://dmamax.netlify.app/legal-module.js"></script>
 
 </body>
-</html>
+    </html>
+    
