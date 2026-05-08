@@ -16,11 +16,11 @@
         .circle-btn { width: 50px; height: 50px; background: var(--ui-panel); border: 2px solid var(--main); border-radius: 50%; color: var(--main); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 20px; transition: 0.2s; }
         .circle-btn:active { transform: scale(0.9); background: var(--main); color: #000; }
 
-        #controls { position: absolute; bottom: 40px; width: 100%; display: flex; justify-content: space-between; align-items: flex-end; padding: 0 40px; box-sizing: border-box; z-index: 20; }
-        #joystick { width: 120px; height: 120px; background: rgba(255,255,255,0.1); border-radius: 50%; position: relative; border: 2px solid rgba(255,255,255,0.2); backdrop-filter: blur(5px); }
-        #stick { width: 50px; height: 50px; background: var(--main); border-radius: 50%; position: absolute; top: 35px; left: 35px; box-shadow: 0 0 15px var(--main); }
+        #controls { position: absolute; bottom: 40px; width: 100%; display: flex; justify-content: space-between; align-items: flex-end; padding: 0 40px; box-sizing: border-box; z-index: 20; pointer-events: none; }
+        #joystick { width: 120px; height: 120px; background: rgba(255,255,255,0.1); border-radius: 50%; position: relative; border: 2px solid rgba(255,255,255,0.2); backdrop-filter: blur(5px); pointer-events: auto; }
+        #stick { width: 50px; height: 50px; background: var(--main); border-radius: 50%; position: absolute; top: 35px; left: 35px; box-shadow: 0 0 15px var(--main); pointer-events: none; }
         
-        .actions { display: flex; gap: 15px; }
+        .actions { display: flex; gap: 15px; pointer-events: auto; }
         .btn { width: 70px; height: 70px; border-radius: 50%; border: 3px solid var(--main); background: var(--ui-panel); color: var(--main); font-weight: bold; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 10px; cursor: pointer; }
         .btn span { font-size: 20px; }
         #jump-btn { border-color: #00c8ff; color: #00c8ff; }
@@ -91,6 +91,7 @@
     let baseJump = 0.3, jumpPower = baseJump;
     let moveInput = { forward: 0, right: 0 };
     let boostTimer = null, jumpTimer = null;
+    let joyId = null, lookId = null, lx = 0, ly = 0; // ИСПРАВЛЕНО: Объявление переменных
     const shapes = {}, others = {}, arrows = [], bonuses = {};
 
     // --- СЦЕНА ---
@@ -122,12 +123,14 @@
     scene.add(player);
 
     // --- УПРАВЛЕНИЕ TOUCH ---
-    let joyId = null, lookId = null, lx = 0, ly = 0;
-
     window.addEventListener('touchstart', e => {
         for (let t of e.changedTouches) {
-            if (t.clientX < window.innerWidth / 2 && joyId === null) joyId = t.identifier;
-            else if (t.clientX >= window.innerWidth / 2 && lookId === null) {
+            // ИСПРАВЛЕНО: Проверка на нажатие кнопок через closest для надежности
+            if (t.target.closest('.btn') || t.target.closest('.circle-btn') || t.target.tagName === 'SELECT') continue;
+
+            if (t.clientX < window.innerWidth / 2 && joyId === null) {
+                joyId = t.identifier;
+            } else if (t.clientX >= window.innerWidth / 2 && lookId === null) {
                 lookId = t.identifier; lx = t.clientX; ly = t.clientY;
             }
         }
@@ -137,9 +140,12 @@
         for (let t of e.changedTouches) {
             if (t.identifier === joyId) {
                 const r = document.getElementById('joystick').getBoundingClientRect();
-                const dx = t.clientX - (r.left + 60), dy = t.clientY - (r.top + 60);
+                const centerX = r.left + r.width/2;
+                const centerY = r.top + r.height/2;
+                const dx = t.clientX - centerX, dy = t.clientY - centerY;
                 const d = Math.min(Math.sqrt(dx*dx+dy*dy), 40), a = Math.atan2(dy, dx);
-                moveInput.right = (Math.cos(a)*d)/40; moveInput.forward = -(Math.sin(a)*d)/40;
+                moveInput.right = (Math.cos(a)*d)/40; 
+                moveInput.forward = -(Math.sin(a)*d)/40;
                 document.getElementById('stick').style.transform = `translate(${Math.cos(a)*d}px, ${Math.sin(a)*d}px)`;
             }
             if (t.identifier === lookId) {
@@ -153,7 +159,11 @@
 
     window.addEventListener('touchend', e => {
         for (let t of e.changedTouches) {
-            if (t.identifier === joyId) { joyId = null; moveInput = {forward:0, right:0}; document.getElementById('stick').style.transform = 'none'; }
+            if (t.identifier === joyId) { 
+                joyId = null; 
+                moveInput = {forward:0, right:0}; 
+                document.getElementById('stick').style.transform = 'none'; 
+            }
             if (t.identifier === lookId) lookId = null;
         }
     });
@@ -168,7 +178,7 @@
     });
     window.addEventListener('keyup', e => keys[e.code] = false);
     window.addEventListener('mousemove', e => {
-        if (document.pointerLockElement === renderer.domElement || !isFirstPerson) {
+        if (document.pointerLockElement === renderer.domElement) {
             yaw -= e.movementX * 0.003; pitch -= e.movementY * 0.003;
             pitch = Math.max(-Math.PI/2.1, Math.min(Math.PI/2.1, pitch));
         }
@@ -178,7 +188,7 @@
     function spawnObject(id, type, style, pos, color, h, ry, isLocal = false, isPersistent = true) {
         if (shapes[id]) return;
         const randH = h || (0.5 + Math.random() * 2);
-        const randY = ry !== undefined ? ry : (Math.random() * 5);
+        const randY = ry !== undefined ? ry : 0;
         
         let geo;
         if(type === 'sphere') geo = new THREE.SphereGeometry(0.5);
@@ -283,7 +293,11 @@
             player.rotation.y = yaw;
         } else {
             const dist = 6;
-            camera.position.set(player.position.x + Math.sin(yaw)*Math.cos(pitch)*dist, player.position.y + Math.sin(pitch)*dist + 2, player.position.z + Math.cos(yaw)*Math.cos(pitch)*dist);
+            camera.position.set(
+                player.position.x + Math.sin(yaw)*Math.cos(pitch)*dist, 
+                player.position.y + Math.sin(pitch)*dist + 2, 
+                player.position.z + Math.cos(yaw)*Math.cos(pitch)*dist
+            );
             camera.lookAt(player.position.x, player.position.y + 1, player.position.z);
         }
 
@@ -320,20 +334,35 @@
         renderer.render(scene, camera);
     }
 
-    // --- КНОПКИ ---
-    document.getElementById('view-btn').onclick = () => {
-        isFirstPerson = !isFirstPerson; playerBody.visible = !isFirstPerson;
+    // --- КНОПКИ И ОБРАБОТЧИКИ ---
+    function bindButton(id, action) {
+        const el = document.getElementById(id);
+        el.addEventListener('touchstart', (e) => {
+            e.preventDefault(); e.stopPropagation();
+            action();
+        }, { passive: false });
+        el.addEventListener('click', action);
+    }
+
+    bindButton('jump-btn', jump);
+    bindButton('sword-btn', attackSword);
+    bindButton('bow-btn', fireBow);
+
+    document.getElementById('view-btn').addEventListener('click', () => {
+        isFirstPerson = !isFirstPerson; 
+        playerBody.visible = !isFirstPerson;
         document.getElementById('crosshair').style.display = isFirstPerson ? 'block' : 'none';
-        if(isFirstPerson) renderer.domElement.requestPointerLock();
-    };
-    document.getElementById('spawn-btn').onclick = () => {
+        if(isFirstPerson && !/Android|iPhone/i.test(navigator.userAgent)) renderer.domElement.requestPointerLock();
+    });
+
+    document.getElementById('spawn-btn').addEventListener('click', () => {
         const p = player.position.clone().add(new THREE.Vector3(0,0,-4).applyAxisAngle(new THREE.Vector3(0,1,0), yaw));
         spawnObject('m'+Date.now(), document.getElementById('shape-select').value, document.getElementById('style-select').value, p, Math.random()*0xffffff, null, null, true, false);
-    };
-    document.getElementById('theme-btn').onclick = () => scene.background.set(scene.background.getHex() === 0x050505 ? 0x87ceeb : 0x050505);
-    document.getElementById('jump-btn').onclick = jump;
-    document.getElementById('sword-btn').onclick = attackSword;
-    document.getElementById('bow-btn').onclick = fireBow;
+    });
+
+    document.getElementById('theme-btn').addEventListener('click', () => {
+        scene.background.set(scene.background.getHex() === 0x050505 ? 0x87ceeb : 0x050505);
+    });
 
     // --- СЕТЕВЫЕ СОБЫТИЯ ---
     channel.subscribe('spawn', m => spawnObject(m.data.id, m.data.type, m.data.style, m.data.pos, m.data.color, m.data.h, m.data.ry, false, m.data.isPersistent));
@@ -357,15 +386,20 @@
     }, 100);
 
     // Инициализация мира
-    for(let i=0; i<50; i++) {
+    for(let i=0; i<30; i++) {
         spawnObject('init'+i, 'cube', 'toon', {x: (Math.random()-0.5)*100, z: (Math.random()-0.5)*100}, Math.random()*0xffffff);
     }
 
     animate();
     channel.presence.enter();
-    window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
-<script src="https://dmamax.netlify.app/legal-module.js"></script>
+    window.addEventListener('resize', () => { 
+        camera.aspect = window.innerWidth / window.innerHeight; 
+        camera.updateProjectionMatrix(); 
+        renderer.setSize(window.innerWidth, window.innerHeight); 
+    });
 
 </script>
+<script src="https://dmamax.netlify.app/legal-module.js"></script>
 </body>
-</html>
+    </html>
+    
