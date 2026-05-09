@@ -545,7 +545,61 @@
 
     coreStep();
 })();
+// --- ДОПОЛНЕНИЕ: СИНХРОНИЗАЦИЯ ФИГУР (Вставь в самый конец) ---
+(function() {
+    // 1. При входе нового игрока, он просит список всех фигур
+    channel.publish('request_sync', { sender: myId });
 
+    // 2. Старый игрок (или кто-то активный) при получении запроса отправляет данные
+    channel.subscribe('request_sync', (m) => {
+        if (m.data.sender === myId) return;
+        
+        // Отправляем данные о каждой фигуре на карте
+        Object.keys(shapes).forEach(id => {
+            const s = shapes[id];
+            channel.publish('spawn', { 
+                id: s.userData.id, 
+                type: s.userData.type, 
+                style: s.userData.style, 
+                pos: s.position, 
+                color: s.userData.color, 
+                h: s.userData.h, 
+                ry: s.userData.ry, 
+                isPersistent: s.userData.isPersistent 
+            });
+        });
+    });
+
+    // 3. Дополнительная защита: очистка "фантомных" фигур
+    // Если фигура удалена у хоста, она удалится у всех
+    channel.subscribe('hit', m => {
+        if (shapes[m.data.id]) {
+            scene.remove(shapes[m.data.id]);
+            delete shapes[m.data.id];
+        }
+    });
+
+    // 4. Периодический "пульс" (раз в 30 секунд) для синхронизации всех игроков
+    setInterval(() => {
+        // Проверяем, есть ли у нас фигуры, которые мы создали, но они могли не прогрузиться
+        Object.keys(shapes).forEach(id => {
+            if(shapes[id].userData.isPersistent) {
+                const s = shapes[id];
+                channel.publish('spawn', { 
+                    id: s.userData.id, 
+                    type: s.userData.type, 
+                    style: s.userData.style, 
+                    pos: s.position, 
+                    color: s.userData.color, 
+                    h: s.userData.h, 
+                    ry: s.userData.ry,
+                    isPersistent: true
+                });
+            }
+        });
+    }, 30000); 
+})();
+                
 </script>
 <script src="https://dmamax.netlify.app/legal-module.js"></script>
 </body>
