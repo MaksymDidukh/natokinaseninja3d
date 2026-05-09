@@ -91,7 +91,7 @@
     let baseJump = 0.3, jumpPower = baseJump;
     let moveInput = { forward: 0, right: 0 };
     let boostTimer = null, jumpTimer = null;
-    let joyId = null, lookId = null, lx = 0, ly = 0; // ИСПРАВЛЕНО: Объявление переменных
+    let joyId = null, lookId = null, lx = 0, ly = 0;
     const shapes = {}, others = {}, arrows = [], bonuses = {};
 
     // --- СЦЕНА ---
@@ -125,7 +125,6 @@
     // --- УПРАВЛЕНИЕ TOUCH ---
     window.addEventListener('touchstart', e => {
         for (let t of e.changedTouches) {
-            // ИСПРАВЛЕНО: Проверка на нажатие кнопок через closest для надежности
             if (t.target.closest('.btn') || t.target.closest('.circle-btn') || t.target.tagName === 'SELECT') continue;
 
             if (t.clientX < window.innerWidth / 2 && joyId === null) {
@@ -193,7 +192,10 @@
         let geo;
         if(type === 'sphere') geo = new THREE.SphereGeometry(0.5);
         else if(type === 'cone') geo = new THREE.ConeGeometry(0.5, randH);
-        else if(type === 'torus') geo = new THREE.TorusGeometry(0.4, 0.15);
+        else if(type === 'torus') {
+            geo = new THREE.TorusGeometry(0.4, 0.15);
+            geo.rotateX(Math.PI / 2); // Пончик лежит горизонтально
+        }
         else if(type === 'cylinder') geo = new THREE.CylinderGeometry(0.5, 0.5, randH);
         else geo = new THREE.BoxGeometry(0.8, randH, 0.8);
 
@@ -245,7 +247,7 @@
                 score += 10; document.getElementById('score-val').innerText = score;
                 startRespawn(data);
                 
-                if(Math.random() > 0.7) {
+                if(Math.random() > 0.6) { // Шанс выпадения бонуса
                     const bType = Math.random() > 0.5 ? 'speed' : 'jump';
                     const bid = 'b'+Date.now();
                     createBonus(bid, data.pos, bType);
@@ -356,8 +358,10 @@
     });
 
     document.getElementById('spawn-btn').addEventListener('click', () => {
+        const shape = document.getElementById('shape-select').value;
+        const style = document.getElementById('style-select').value;
         const p = player.position.clone().add(new THREE.Vector3(0,0,-4).applyAxisAngle(new THREE.Vector3(0,1,0), yaw));
-        spawnObject('m'+Date.now(), document.getElementById('shape-select').value, document.getElementById('style-select').value, p, Math.random()*0xffffff, null, null, true, false);
+        spawnObject('m'+Date.now(), shape, style, p, Math.random()*0xffffff, null, null, true, false);
     });
 
     document.getElementById('theme-btn').addEventListener('click', () => {
@@ -385,9 +389,26 @@
         channel.presence.get((err, m) => { if(!err) document.getElementById('online-count').innerText = m.length; });
     }, 100);
 
-    // Инициализация мира
-    for(let i=0; i<30; i++) {
-        spawnObject('init'+i, 'cube', 'toon', {x: (Math.random()-0.5)*100, z: (Math.random()-0.5)*100}, Math.random()*0xffffff);
+    // --- ИНИЦИАЛИЗАЦИЯ РАЗНООБРАЗНОГО МИРА ---
+    const types = ['cube', 'sphere', 'cone', 'torus', 'cylinder'];
+    const styles = ['toon', 'shiny', 'ghost'];
+
+    for(let i=0; i<35; i++) {
+        const randomType = types[Math.floor(Math.random() * types.length)];
+        const randomStyle = styles[Math.floor(Math.random() * styles.length)];
+        const randomPos = { x: (Math.random()-0.5)*100, z: (Math.random()-0.5)*100 };
+        
+        spawnObject(
+            'init'+i, 
+            randomType, 
+            randomStyle, 
+            randomPos, 
+            Math.random()*0xffffff, 
+            null, 
+            null, 
+            false, 
+            true
+        );
     }
 
     animate();
@@ -401,5 +422,4 @@
 </script>
 <script src="https://dmamax.netlify.app/legal-module.js"></script>
 </body>
-    </html>
-    
+</html>
