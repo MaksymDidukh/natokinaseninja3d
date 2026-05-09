@@ -68,9 +68,9 @@
 <div id="controls">
     <div id="joystick"><div id="stick"></div></div>
     <div class="actions">
-        <div class="btn" id="jump-btn"><span>🚀</span>ПРЫЖОК</div>
-        <div class="btn" id="sword-btn"><span>⚔️</span>МЕЧ</div>
-        <div class="btn" id="bow-btn"><span>🏹</span>ЛУК</div>
+        <div class="btn" id="jump-btn"><span>🚀</span>JUMP [Spc]</div>
+        <div class="btn" id="sword-btn"><span>⚔️</span>SWORD [F]</div>
+        <div class="btn" id="bow-btn"><span>🏹</span>BOW [G]</div>
     </div>
 </div>
 
@@ -93,6 +93,10 @@
     let boostTimer = null, jumpTimer = null;
     let joyId = null, lookId = null, lx = 0, ly = 0;
     const shapes = {}, others = {}, arrows = [], bonuses = {};
+    const keys = {};
+    
+    // НАСТРОЙКА ИНВЕРСИИ: false = вниз это вниз, true = инверсия
+    let invertY = false; 
 
     // --- СЦЕНА ---
     const scene = new THREE.Scene();
@@ -122,15 +126,41 @@
 
     scene.add(player);
 
-    // --- УПРАВЛЕНИЕ TOUCH ---
+    // --- УПРАВЛЕНИЕ ---
+
+    // Фиксация курсора (Pointer Lock)
+    renderer.domElement.addEventListener('click', () => {
+        if (!/Android|iPhone/i.test(navigator.userAgent)) {
+            renderer.domElement.requestPointerLock();
+        }
+    });
+
+    // Обработка мыши (с учетом инверсии)
+    window.addEventListener('mousemove', e => {
+        if (document.pointerLockElement === renderer.domElement) {
+            const sensitivity = 0.002;
+            yaw -= e.movementX * sensitivity;
+            
+            // ЛОГИКА ИНВЕРСИИ
+            if (invertY) {
+                pitch -= e.movementY * sensitivity;
+            } else {
+                pitch += e.movementY * sensitivity;
+            }
+            
+            pitch = Math.max(-Math.PI/2.1, Math.min(Math.PI/2.1, pitch));
+        }
+    });
+
+    // Тач-управление (мобильные)
     window.addEventListener('touchstart', e => {
         for (let t of e.changedTouches) {
             if (t.target.closest('.btn') || t.target.closest('.circle-btn') || t.target.tagName === 'SELECT') continue;
-
-            if (t.clientX < window.innerWidth / 2 && joyId === null) {
+            if (t.clientX < window.innerWidth / 2) {
                 joyId = t.identifier;
-            } else if (t.clientX >= window.innerWidth / 2 && lookId === null) {
-                lookId = t.identifier; lx = t.clientX; ly = t.clientY;
+            } else {
+                lookId = t.identifier;
+                lx = t.clientX; ly = t.clientY;
             }
         }
     }, { passive: false });
@@ -142,14 +172,25 @@
                 const centerX = r.left + r.width/2;
                 const centerY = r.top + r.height/2;
                 const dx = t.clientX - centerX, dy = t.clientY - centerY;
-                const d = Math.min(Math.sqrt(dx*dx+dy*dy), 40), a = Math.atan2(dy, dx);
-                moveInput.right = (Math.cos(a)*d)/40; 
-                moveInput.forward = -(Math.sin(a)*d)/40;
+                const d = Math.min(Math.sqrt(dx*dx+dy*dy), 45);
+                const a = Math.atan2(dy, dx);
+                moveInput.right = (Math.cos(a) * d) / 45; 
+                moveInput.forward = -(Math.sin(a) * d) / 45;
                 document.getElementById('stick').style.transform = `translate(${Math.cos(a)*d}px, ${Math.sin(a)*d}px)`;
             }
             if (t.identifier === lookId) {
-                yaw -= (t.clientX - lx) * 0.007;
-                pitch -= (t.clientY - ly) * 0.007;
+                const dx = t.clientX - lx;
+                const dy = t.clientY - ly;
+                const sensitivity = 0.005;
+                yaw -= dx * sensitivity;
+                
+                // ЛОГИКА ИНВЕРСИИ ДЛЯ ТАЧА
+                if (invertY) {
+                    pitch -= dy * sensitivity;
+                } else {
+                    pitch += dy * sensitivity;
+                }
+                
                 pitch = Math.max(-Math.PI/2.1, Math.min(Math.PI/2.1, pitch));
                 lx = t.clientX; ly = t.clientY;
             }
@@ -159,16 +200,13 @@
     window.addEventListener('touchend', e => {
         for (let t of e.changedTouches) {
             if (t.identifier === joyId) { 
-                joyId = null; 
-                moveInput = {forward:0, right:0}; 
+                joyId = null; moveInput = {forward:0, right:0}; 
                 document.getElementById('stick').style.transform = 'none'; 
             }
             if (t.identifier === lookId) lookId = null;
         }
     });
 
-    // --- УПРАВЛЕНИЕ ПК ---
-    const keys = {};
     window.addEventListener('keydown', e => { 
         keys[e.code] = true; 
         if(e.code === 'Space') jump();
@@ -176,43 +214,30 @@
         if(e.code === 'KeyG') fireBow();
     });
     window.addEventListener('keyup', e => keys[e.code] = false);
-    window.addEventListener('mousemove', e => {
-        if (document.pointerLockElement === renderer.domElement) {
-            yaw -= e.movementX * 0.003; pitch -= e.movementY * 0.003;
-            pitch = Math.max(-Math.PI/2.1, Math.min(Math.PI/2.1, pitch));
-        }
-    });
 
-    // --- ЛОГИКА ОБЪЕКТОВ ---
+    // --- ФУНКЦИИ ГЕЙМПЛЕЯ ---
+
     function spawnObject(id, type, style, pos, color, h, ry, isLocal = false, isPersistent = true) {
         if (shapes[id]) return;
         const randH = h || (0.5 + Math.random() * 2);
         const randY = ry !== undefined ? ry : 0;
-        
         let geo;
         if(type === 'sphere') geo = new THREE.SphereGeometry(0.5);
         else if(type === 'cone') geo = new THREE.ConeGeometry(0.5, randH);
-        else if(type === 'torus') {
-            geo = new THREE.TorusGeometry(0.4, 0.15);
-            geo.rotateX(Math.PI / 2); // Пончик лежит горизонтально
-        }
+        else if(type === 'torus') { geo = new THREE.TorusGeometry(0.4, 0.15); geo.rotateX(Math.PI/2); }
         else if(type === 'cylinder') geo = new THREE.CylinderGeometry(0.5, 0.5, randH);
         else geo = new THREE.BoxGeometry(0.8, randH, 0.8);
-
         let mat;
         if(style === 'ghost') mat = new THREE.MeshPhongMaterial({ color, transparent: true, opacity: 0.5 });
         else if(style === 'shiny') mat = new THREE.MeshStandardMaterial({ color, metalness: 0.7, roughness: 0.1 });
         else mat = new THREE.MeshToonMaterial({ color });
-
         const mesh = new THREE.Mesh(geo, mat);
         mesh.position.set(pos.x, randY + (randH/2), pos.z);
         mesh.userData = { id, type, style, color, h: randH, ry: randY, isPersistent };
-        
         if(style === 'toon') {
             const outline = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide }));
             outline.scale.multiplyScalar(1.05); mesh.add(outline);
         }
-
         scene.add(mesh);
         shapes[id] = mesh;
         if(isLocal) channel.publish('spawn', { id, type, style, pos, color, h: randH, ry: randY, isPersistent });
@@ -232,7 +257,6 @@
         scene.add(b); bonuses[id] = b;
     }
 
-    // --- ГЕЙМПЛЕЙНЫЕ ФУНКЦИИ ---
     function jump() { if(isGrounded) { vVel = jumpPower; isGrounded = false; } }
 
     function attackSword() {
@@ -246,8 +270,7 @@
                 scene.remove(target); delete shapes[id];
                 score += 10; document.getElementById('score-val').innerText = score;
                 startRespawn(data);
-                
-                if(Math.random() > 0.6) { // Шанс выпадения бонуса
+                if(Math.random() > 0.6) {
                     const bType = Math.random() > 0.5 ? 'speed' : 'jump';
                     const bid = 'b'+Date.now();
                     createBonus(bid, data.pos, bType);
@@ -273,7 +296,8 @@
         if(isLocal) channel.publish('fire', { pos, dir });
     }
 
-    // --- ЦИКЛ И ОБНОВЛЕНИЕ ---
+    // --- ЦИКЛ АНИМАЦИИ ---
+
     function animate() {
         requestAnimationFrame(animate);
 
@@ -303,7 +327,6 @@
             camera.lookAt(player.position.x, player.position.y + 1, player.position.z);
         }
 
-        // Бонусы и Стрелы
         Object.keys(bonuses).forEach(id => {
             bonuses[id].rotation.y += 0.05;
             if(player.position.distanceTo(bonuses[id].position) < 1.2) {
@@ -336,14 +359,12 @@
         renderer.render(scene, camera);
     }
 
-    // --- КНОПКИ И ОБРАБОТЧИКИ ---
+    // --- КНОПКИ ---
+
     function bindButton(id, action) {
         const el = document.getElementById(id);
-        el.addEventListener('touchstart', (e) => {
-            e.preventDefault(); e.stopPropagation();
-            action();
-        }, { passive: false });
-        el.addEventListener('click', action);
+        el.addEventListener('touchstart', (e) => { e.preventDefault(); action(); }, { passive: false });
+        el.addEventListener('mousedown', (e) => { action(); });
     }
 
     bindButton('jump-btn', jump);
@@ -354,7 +375,6 @@
         isFirstPerson = !isFirstPerson; 
         playerBody.visible = !isFirstPerson;
         document.getElementById('crosshair').style.display = isFirstPerson ? 'block' : 'none';
-        if(isFirstPerson && !/Android|iPhone/i.test(navigator.userAgent)) renderer.domElement.requestPointerLock();
     });
 
     document.getElementById('spawn-btn').addEventListener('click', () => {
@@ -368,7 +388,7 @@
         scene.background.set(scene.background.getHex() === 0x050505 ? 0x87ceeb : 0x050505);
     });
 
-    // --- СЕТЕВЫЕ СОБЫТИЯ ---
+    // --- СЕТЬ ---
     channel.subscribe('spawn', m => spawnObject(m.data.id, m.data.type, m.data.style, m.data.pos, m.data.color, m.data.h, m.data.ry, false, m.data.isPersistent));
     channel.subscribe('hit', m => { if(shapes[m.data.id]) { scene.remove(shapes[m.data.id]); delete shapes[m.data.id]; }});
     channel.subscribe('fire', m => spawnArrow(m.data.pos, m.data.dir, false));
@@ -389,26 +409,10 @@
         channel.presence.get((err, m) => { if(!err) document.getElementById('online-count').innerText = m.length; });
     }, 100);
 
-    // --- ИНИЦИАЛИЗАЦИЯ РАЗНООБРАЗНОГО МИРА ---
+     // Мир
     const types = ['cube', 'sphere', 'cone', 'torus', 'cylinder'];
-    const styles = ['toon', 'shiny', 'ghost'];
-
     for(let i=0; i<35; i++) {
-        const randomType = types[Math.floor(Math.random() * types.length)];
-        const randomStyle = styles[Math.floor(Math.random() * styles.length)];
-        const randomPos = { x: (Math.random()-0.5)*100, z: (Math.random()-0.5)*100 };
-        
-        spawnObject(
-            'init'+i, 
-            randomType, 
-            randomStyle, 
-            randomPos, 
-            Math.random()*0xffffff, 
-            null, 
-            null, 
-            false, 
-            true
-        );
+        spawnObject('init'+i, types[Math.floor(Math.random()*types.length)], 'toon', { x: (Math.random()-0.5)*100, z: (Math.random()-0.5)*100 }, Math.random()*0xffffff, null, null, false, true);
     }
 
     animate();
