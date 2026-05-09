@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>NatokinaseNinja3D - Full Version</title>
+    <title>NatokinaseNinja3D</title>
     <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
     <style>
         :root { --main: #00ff88; --bg: #050505; --ui-panel: rgba(0,0,0,0.85); }
@@ -346,7 +346,7 @@
         renderer.render(scene, camera);
     }
 
-    // --- ИНТЕРФЕЙС И КНОПКИ ---
+    // --- // --- ИНТЕРФЕЙС И КНОПКИ ---
     function bindButton(id, action) {
         const el = document.getElementById(id);
         el.addEventListener('touchstart', (e) => { e.preventDefault(); action(); }, { passive: false });
