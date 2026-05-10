@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>NatokinaseNinja3D</title>
+    <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
+    <style>
+        :root { --main: #00ff88; --bg: #050505; --ui-panel: rgba(0,0,0,0.85); }
+        body { margin: 0; overflow: hidden; background: var(--bg); touch-action: none; user-select: none; font-family: 'Segoe UI', sans-serif; }
+        
+        #ui { position: absolute; top: 20px; left: 20px; color: var(--main); pointer-events: none; z-index: 10; }
+        .stats { font-size: 14px; font-weight: bold; background: var(--ui-panel); padding: 15px; border-radius: 12px; border: 2px solid var(--main); backdrop-filter: blur(10px); }
+        
+        #top-right { position: absolute; top: 20px; right: 20px; display: flex; flex-direction: column; gap: 10px; pointer-events: auto; z-index: 20; }
+        .circle-btn { width: 50px; height: 50px; background: var(--ui-panel); border: 2px solid var(--main); border-radius: 50%; color: var(--main); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 20px; transition: 0.2s; }
+        .circle-btn:active { transform: scale(0.9); background: var(--main); color: #000; }
+
+        #controls { position: absolute; bottom: 40px; width: 100%; display: flex; justify-content: space-between; align-items: flex-end; padding: 0 40px; box-sizing: border-box; z-index: 20; pointer-events: none; }
+        #joystick { width: 120px; height: 120px; background: rgba(255,255,255,0.1); border-radius: 50%; position: relative; border: 2px solid rgba(255,255,255,0.2); backdrop-filter: blur(5px); pointer-events: auto; }
+        #stick { width: 50px; height: 50px; background: var(--main); border-radius: 50%; position: absolute; top: 35px; left: 35px; box-shadow: 0 0 15px var(--main); pointer-events: none; }
+        
+        .actions { display: flex; gap: 15px; pointer-events: auto; }
+        .btn { width: 70px; height: 70px; border-radius: 50%; border: 3px solid var(--main); background: var(--ui-panel); color: var(--main); font-weight: bold; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 10px; cursor: pointer; }
+        .btn span { font-size: 20px; }
+        #jump-btn { border-color: #00c8ff; color: #00c8ff; }
+
+        #crosshair { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--main); font-size: 30px; pointer-events: none; z-index: 1000; display: none; font-family: monospace; }
+        
+        .active-tag { display: none; position: absolute; left: 20px; padding: 5px 10px; border-radius: 5px; font-weight: bold; font-size: 12px; z-index: 5; animation: pulse 1s infinite; }
+        #speed-tag { top: 110px; background: gold; color: black; }
+        #jump-tag { top: 145px; background: #00c8ff; color: white; }
+        @keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }
+        
+        select { background: var(--ui-panel); color: var(--main); border: 1px solid var(--main); border-radius: 5px; padding: 5px; outline: none; }
+    </style>
+</head>
+<body>
+
+<div id="crosshair">+</div>
+
+<div id="ui">
+    <div class="stats">
+        SCORE: <span id="score-val">0</span> | ONLINE: <span id="online-count">1</span>
+    </div>
+    <div id="speed-tag" class="active-tag">⚡ SPEED UP!</div>
+    <div id="jump-tag" class="active-tag">🚀 HIGH JUMP!</div>
+</div>
+
+<div id="top-right">
+    <div class="circle-btn" id="view-btn" title="Вид">ADD</div>
+    <div class="circle-btn" id="theme-btn" title="Тема">THEME</div>
+    <select id="shape-select">
+        <option value="cube">Блок</option>
+        <option value="sphere">Сфера</option>
+        <option value="cone">Конус</option>
+        <option value="torus">Пончик</option>
+        <option value="cylinder">Цилиндр</option>
+    </select>
+    <select id="style-select">
+        <option value="toon">Toon</option>
+        <option value="shiny">Shiny</option>
+        <option value="ghost">Ghost</option>
+    </select>
+    <div class="circle-btn" id="spawn-btn" style="background: var(--main); color: black;">ADD+</div>
+</div>
+
+<div id="controls">
+    <div id="joystick"><div id="stick"></div></div>
+    <div class="actions">
+        <div class="btn" id="jump-btn"><span>🚀</span>JUMP [Spc]</div>
+        <div class="btn" id="sword-btn"><span>⚔️</span>SWORD [F]</div>
+        <div class="btn" id="bow-btn"><span>🏹</span>BOW [G]</div>
+    </div>
+</div>
+
+<script type="module">
+    import * as THREE from 'https://unpkg.com/three@0.158.0/build/three.module.js';
+
+    // --- КОНФИГУРАЦИЯ ---
+    const ABLY_KEY = 'HHej2w.Y5vcmw:mpzRZCgcRSymCq2jv5H9QB2-EJv_uZfda-s3BI0m2SQ';
+    const ably = new Ably.Realtime({ key: ABLY_KEY, clientId: 'p' + Math.floor(Math.random() * 10000) });
+    const channel = ably.channels.get('ninja-world');
+    const myId = ably.auth.clientId;
+
+    // --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ---
+    window.score = 0;
+    window.isFirstPerson = false;
+    window.yaw = 0; 
+    window.pitch = 0;
+    window.vVel = 0; 
+    window.isGrounded = true;
+    window.baseSpeed = 0.2; 
+    window.moveSpeed = baseSpeed;
+    window.baseJump = 0.3; 
+    window.jumpPower = baseJump;
+    window.invertY = false;
+    
+    const moveInput = { forward: 0, right: 0 };
+    const shapes = {}, others = {}, arrows = [], bonuses = {};
+    const keys = {};
+    let boostTimer = null, jumpTimer = null;
+    let joyId = null, lookId = null, lx = 0, ly = 0;
+
+    // --- СЦЕНА ---
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87ceeb);
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+    const sun = new THREE.DirectionalLight(0xffffff, 1);
+    sun.position.set(10, 20, 10); scene.add(sun);
+    scene.add(new THREE.GridHelper(200, 50, 0x00ff88, 0x222222));
+
+    // --- ИГРОК ---
+    const player = new THREE.Group();
+    const playerBody = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.7), new THREE.MeshToonMaterial({ color: 0x00ff88 }));
+    playerBody.position.y = 0.65; player.add(playerBody);
+    
+    const sword = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.8, 0.1), new THREE.MeshStandardMaterial({ color: 0xcccccc }));
+    sword.position.set(0.4, 0.6, -0.3); sword.rotation.x = -Math.PI/4;
+    player.add(sword);
+    
+    const bowModel = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.02, 8, 12, Math.PI), new THREE.MeshBasicMaterial({ color: 0x00c8ff }));
+    bowModel.position.set(-0.35, 0.7, -0.2); bowModel.rotation.y = -Math.PI/2;
+    player.add(bowModel);
+    scene.add(player);
+
+    // --- ФУНКЦИИ ЯДРА ---
+
+    window.spawnObject = function(id, type, style, pos, color, h, ry, isLocal = false, isPersistent = true) {
+        if (shapes[id]) return;
+        const randH = h || (0.5 + Math.random() * 2);
+        const randY = ry !== undefined ? ry : 0;
+        let geo;
+        if(type === 'sphere') geo = new THREE.SphereGeometry(0.5);
+        else if(type === 'cone') geo = new THREE.ConeGeometry(0.5, randH);
+        else if(type === 'torus') { geo = new THREE.TorusGeometry(0.4, 0.15); geo.rotateX(Math.PI/2); }
+        else if(type === 'cylinder') geo = new THREE.CylinderGeometry(0.5, 0.5, randH);
+        else geo = new THREE.BoxGeometry(0.8, randH, 0.8);
+        
+        let mat;
+        if(style === 'ghost') mat = new THREE.MeshPhongMaterial({ color, transparent: true, opacity: 0.5 });
+        else if(style === 'shiny') mat = new THREE.MeshStandardMaterial({ color, metalness: 0.7, roughness: 0.1 });
+        else mat = new THREE.MeshToonMaterial({ color });
+        
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(pos.x, randY + (randH/2), pos.z);
+        mesh.userData = { id, type, style, color, h: randH, ry: randY, isPersistent };
+        
+        if(style === 'toon') {
+            const outline = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide }));
+            outline.scale.multiplyScalar(1.05); mesh.add(outline);
+        }
+        scene.add(mesh);
+        shapes[id] = mesh;
+        if(isLocal) channel.publish('spawn', { id, type, style, pos, color, h: randH, ry: randY, isPersistent });
+    }
+
+    function jump() { if(isGrounded) { vVel = jumpPower; isGrounded = false; } }
+
+    function attackSword() {
+        sword.rotation.x = -Math.PI/2; 
+        setTimeout(() => sword.rotation.x = -Math.PI/4, 150);
+        Object.keys(shapes).forEach(id => {
+            const target = shapes[id];
+            if(player.position.distanceTo(target.position) < 2.5) {
+                const data = { ...target.userData, pos: target.position.clone() };
+                channel.publish('hit', { id });
+                scene.remove(target); delete shapes[id];
+                score += 10; document.getElementById('score-val').innerText = score;
+                if(data.isPersistent) setTimeout(() => spawnObject(data.id, data.type, data.style, data.pos, data.color, data.h, data.ry, true, true), 10000);
+                
+                if(Math.random() > 0.6) {
+                    const bType = Math.random() > 0.5 ? 'speed' : 'jump';
+                    const bid = 'b'+Date.now();
+                    createBonus(bid, data.pos, bType);
+                    channel.publish('bonus_spawn', { id: bid, pos: data.pos, type: bType });
+                }
+            }
+        });
+    }
+
+    function fireBow() {
+        bowModel.rotation.x = -0.6; setTimeout(() => bowModel.rotation.x = 0, 200);
+        const dir = new THREE.Vector3(0,0,-1).applyQuaternion(isFirstPerson ? camera.quaternion : player.quaternion);
+        const pos = player.position.clone().add(new THREE.Vector3(0, 0.8, 0));
+        spawnArrow(pos, dir, true);
+    }
+
+    function spawnArrow(pos, dir, isLocal) {
+        const arrow = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.6), new THREE.MeshBasicMaterial({ color: 0x00c8ff }));
+        arrow.position.copy(pos);
+        arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+        arrows.push({ mesh: arrow, dir, life: 100 }); scene.add(arrow);
+        if(isLocal) channel.publish('fire', { pos, dir });
+    }
+
+    function createBonus(id, pos, type) {
+        if(bonuses[id]) return;
+        const color = type === 'speed' ? 0xffeb3b : 0x00c8ff;
+        const b = new THREE.Group();
+        b.add(new THREE.Mesh(new THREE.SphereGeometry(0.3), new THREE.MeshBasicMaterial({ color })));
+        b.position.copy(pos); b.userData = { type };
+        scene.add(b); bonuses[id] = b;
+    }
+
+    // --- УПРАВЛЕНИЕ ---
+    renderer.domElement.addEventListener('click', () => {
+        if (!/Android|iPhone/i.test(navigator.userAgent)) renderer.domElement.requestPointerLock();
+    });
+
+    window.addEventListener('mousemove', e => {
+        if (document.pointerLockElement === renderer.domElement) {
+            const sensitivity = 0.002;
+            yaw -= e.movementX * sensitivity;
+            pitch += e.movementY * (invertY ? -sensitivity : sensitivity);
+            pitch = Math.max(-Math.PI/2.1, Math.min(Math.PI/2.1, pitch));
+        }
+    });
+
+    window.addEventListener('touchstart', e => {
+        for (let t of e.changedTouches) {
+            if (t.target.closest('.btn') || t.target.closest('.circle-btn') || t.target.tagName === 'SELECT') continue;
+            if (t.clientX < window.innerWidth / 2) joyId = t.identifier;
+            else { lookId = t.identifier; lx = t.clientX; ly = t.clientY; }
+        }
+    }, { passive: false });
+
+    window.addEventListener('touchmove', e => {
+        for (let t of e.changedTouches) {
+            if (t.identifier === joyId) {
+                const r = document.getElementById('joystick').getBoundingClientRect();
+                const centerX = r.left + r.width/2, centerY = r.top + r.height/2;
+                const dx = t.clientX - centerX, dy = t.clientY - centerY;
+                const d = Math.min(Math.sqrt(dx*dx+dy*dy), 45), a = Math.atan2(dy, dx);
+                moveInput.right = (Math.cos(a) * d) / 45; moveInput.forward = -(Math.sin(a) * d) / 45;
+                document.getElementById('stick').style.transform = `translate(${Math.cos(a)*d}px, ${Math.sin(a)*d}px)`;
+            }
+            if (t.identifier === lookId) {
+                const dx = t.clientX - lx, dy = t.clientY - ly;
+                const sensitivity = 0.005;
+                yaw -= dx * sensitivity;
+                pitch += dy * (invertY ? -sensitivity : sensitivity);
+                pitch = Math.max(-Math.PI/2.1, Math.min(Math.PI/2.1, pitch));
+                lx = t.clientX; ly = t.clientY;
+            }
+        }
+    }, { passive: false });
+
+    window.addEventListener('touchend', e => {
+        for (let t of e.changedTouches) {
+            if (t.identifier === joyId) { joyId = null; moveInput.forward = 0; moveInput.right = 0; document.getElementById('stick').style.transform = 'none'; }
+            if (t.identifier === lookId) lookId = null;
+        }
+    });
+
+    window.addEventListener('keydown', e => { 
+        keys[e.code] = true; 
+        if(e.code === 'Space') jump();
+        if(e.code === 'KeyF') attackSword();
+        if(e.code === 'KeyG') fireBow();
+    });
+    window.addEventListener('keyup', e => keys[e.code] = false);
+
+    // --- ФИЗИКА И ЦИКЛ ---
+    function animate() {
+        requestAnimationFrame(animate);
+
+        const f = (keys['KeyW']?1:0) + (keys['KeyS']?-1:0) + moveInput.forward;
+        const r = (keys['KeyD']?1:0) + (keys['KeyA']?-1:0) + moveInput.right;
+
+        if (f !== 0 || r !== 0) {
+            const mv = new THREE.Vector3(r, 0, -f).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+            player.position.addScaledVector(mv, moveSpeed);
+            if (!isFirstPerson) player.rotation.y = THREE.MathUtils.lerp(player.rotation.y, Math.atan2(mv.x, mv.z), 0.15);
+        }
+
+        vVel -= 0.012; player.position.y += vVel;
+
+        // Физика платформ
+        let onObject = false;
+        Object.values(shapes).forEach(obj => {
+            const dx = Math.abs(player.position.x - obj.position.x);
+            const dz = Math.abs(player.position.z - obj.position.z);
+            if (dx < 0.7 && dz < 0.7) {
+                const topY = obj.position.y + (obj.userData.h / 2);
+                if (player.position.y >= topY - 0.2 && player.position.y <= topY + 0.1 && vVel <= 0) {
+                    player.position.y = topY; vVel = 0; isGrounded = true; onObject = true;
+                }
+            }
+        });
+
+        if(player.position.y < 0) { player.position.y = 0; vVel = 0; isGrounded = true; }
+        else if (!onObject && player.position.y > 0) isGrounded = false;
+
+        // Камера
+        if (isFirstPerson) {
+            camera.position.copy(player.position).y += 1.2;
+            camera.rotation.set(pitch, yaw, 0, 'YXZ');
+            player.rotation.y = yaw;
+        } else {
+            const dist = 6;
+            camera.position.set(
+                player.position.x + Math.sin(yaw)*Math.cos(pitch)*dist, 
+                player.position.y + Math.sin(pitch)*dist + 2, 
+                player.position.z + Math.cos(yaw)*Math.cos(pitch)*dist
+            );
+            camera.lookAt(player.position.x, player.position.y + 1, player.position.z);
+        }
+
+        // Бонусы и Стрелы
+        Object.keys(bonuses).forEach(id => {
+            bonuses[id].rotation.y += 0.05;
+            if(player.position.distanceTo(bonuses[id].position) < 1.2) {
+                const type = bonuses[id].userData.type;
+                if(type === 'speed') {
+                    moveSpeed = 0.35; document.getElementById('speed-tag').style.display = 'block';
+                    clearTimeout(boostTimer); boostTimer = setTimeout(() => { moveSpeed = baseSpeed; document.getElementById('speed-tag').style.display = 'none'; }, 5000);
+                } else {
+                    jumpPower = 0.55; document.getElementById('jump-tag').style.display = 'block';
+                    clearTimeout(jumpTimer); jumpTimer = setTimeout(() => { jumpPower = baseJump; document.getElementById('jump-tag').style.display = 'none'; }, 5000);
+                }
+                scene.remove(bonuses[id]); delete bonuses[id];
+                channel.publish('bonus_collect', { id });
+            }
+        });
+
+        arrows.forEach((a, i) => {
+            a.mesh.position.addScaledVector(a.dir, 0.6); a.life--;
+            Object.keys(shapes).forEach(sid => {
+                if(shapes[sid] && a.mesh.position.distanceTo(shapes[sid].position) < 1.2) {
+                    const data = { ...shapes[sid].userData, pos: shapes[sid].position.clone() };
+                    channel.publish('hit', { id: sid });
+                    scene.remove(shapes[sid]); delete shapes[sid];
+                    if(data.isPersistent) setTimeout(() => spawnObject(data.id, data.type, data.style, data.pos, data.color, data.h, data.ry, true, true), 10000);
+                    a.life = 0;
+                }
+            });
+            if(a.life <= 0) { scene.remove(a.mesh); arrows.splice(i, 1); }
+        });
+
+        renderer.render(scene, camera);
+    }
+
+    // --- // --- ИНТЕРФЕЙС И КНОПКИ ---
+    function bindButton(id, action) {
+        const el = document.getElementById(id);
+        el.addEventListener('touchstart', (e) => { e.preventDefault(); action(); }, { passive: false });
+        el.addEventListener('mousedown', () => action());
+    }
+
+    bindButton('jump-btn', jump);
+    bindButton('sword-btn', attackSword);
+    bindButton('bow-btn', fireBow);
+
+    document.getElementById('view-btn').onclick = () => {
+        isFirstPerson = !isFirstPerson; 
+        playerBody.visible = !isFirstPerson;
+        document.getElementById('crosshair').style.display = isFirstPerson ? 'block' : 'none';
+    };
+
+    document.getElementById('spawn-btn').onclick = () => {
+        const shape = document.getElementById('shape-select').value;
+        const style = document.getElementById('style-select').value;
+        const p = player.position.clone().add(new THREE.Vector3(0,0,-4).applyAxisAngle(new THREE.Vector3(0,1,0), yaw));
+        spawnObject('m'+Date.now(), shape, style, p, Math.random()*0xffffff, null, null, true, false);
+    };
+
+    document.getElementById('theme-btn').onclick = () => {
+        scene.background.set(scene.background.getHex() === 0x050505 ? 0x87ceeb : 0x050505);
+    };
+
+    // --- СЕТЕВАЯ СИНХРОНИЗАЦИЯ ---
+    channel.subscribe('spawn', m => spawnObject(m.data.id, m.data.type, m.data.style, m.data.pos, m.data.color, m.data.h, m.data.ry, false, m.data.isPersistent));
+    channel.subscribe('hit', m => { if(shapes[m.data.id]) { scene.remove(shapes[m.data.id]); delete shapes[m.data.id]; }});
+    channel.subscribe('fire', m => spawnArrow(m.data.pos, m.data.dir, false));
+    channel.subscribe('bonus_spawn', m => createBonus(m.data.id, m.data.pos, m.data.type));
+    channel.subscribe('bonus_collect', m => { if(bonuses[m.data.id]) { scene.remove(bonuses[m.data.id]); delete bonuses[m.data.id]; }});
+    channel.subscribe('move', m => {
+        if(m.data.id === myId) return;
+        if(!others[m.data.id]) {
+            others[m.data.id] = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.7), new THREE.MeshBasicMaterial({color: 0xff0055}));
+            scene.add(others[m.data.id]);
+        }
+        others[m.data.id].position.set(m.data.x, m.data.y + 0.65, m.data.z);
+        others[m.data.id].rotation.y = m.data.r;
+    });
+
+    // Полная синхронизация при входе
+    channel.subscribe('request_sync', (m) => {
+        if (m.data.sender === myId) return;
+        Object.values(shapes).forEach(s => {
+            channel.publish('spawn', { id: s.userData.id, type: s.userData.type, style: s.userData.style, pos: s.position, color: s.userData.color, h: s.userData.h, ry: s.userData.ry, isPersistent: s.userData.isPersistent });
+        });
+    });
+    setTimeout(() => channel.publish('request_sync', { sender: myId }), 1000);
+
+    setInterval(() => {
+        channel.publish('move', { id: myId, x: player.position.x, y: player.position.y, z: player.position.z, r: player.rotation.y });
+        channel.presence.get((err, m) => { if(!err) document.getElementById('online-count').innerText = m.length; });
+    }, 100);
+
+    // Инициализация мира
+    const types = ['cube', 'sphere', 'cone', 'torus', 'cylinder'];
+    for(let i=0; i<35; i++) {
+        spawnObject('init'+i, types[Math.floor(Math.random()*types.length)], 'toon', { x: (Math.random()-0.5)*100, z: (Math.random()-0.5)*100 }, Math.random()*0xffffff, null, null, false, true);
+    }
+
+    animate();
+    channel.presence.enter();
+    window.addEventListener('resize', () => { 
+        camera.aspect = window.innerWidth / window.innerHeight; 
+        camera.updateProjectionMatrix(); 
+        renderer.setSize(window.innerWidth, window.innerHeight); 
+    });
+
+    // --- ДОПОЛНИТЕЛЬНЫЕ МОДУЛИ ---
+    
+    // Кнопка Инверсии
+    (function() {
+        const btn = document.createElement('div');
+        btn.className = 'circle-btn'; btn.innerHTML = '↕️';
+        document.getElementById('top-right').appendChild(btn);
+        btn.onclick = () => {
+            window.invertY = !window.invertY;
+            btn.style.borderColor = window.invertY ? '#ff00ff' : 'var(--main)';
+            btn.innerHTML = window.invertY ? '🔄' : '↕️';
+        };
+    })();
+
+    // Массовая генерация
+    (function() {
+        const genBtn = document.createElement('div');
+        genBtn.className = 'circle-btn'; genBtn.innerHTML = 'ADD++';
+        genBtn.style.background = 'linear-gradient(45deg, #00ff88, #00c8ff)'; genBtn.style.color = 'black';
+        document.getElementById('top-right').appendChild(genBtn);
+        function massSpawn() {
+            for (let i = 0; i < 50; i++) {
+                spawnObject('mass_'+Date.now()+'_'+i, types[Math.floor(Math.random()*types.length)], 'toon', 
+                { x: (Math.random()-0.5)*100, z: (Math.random()-0.5)*100 }, Math.random()*0xffffff, 0.5+Math.random()*2, Math.random()*15, true, false);
+            }
+        }
+        genBtn.onclick = massSpawn;
+        window.addEventListener('keydown', e => { if(e.code === 'KeyR') massSpawn(); });
+    })();
+
+    // Кнопка поворота/полного экрана
+    (function() {
+        const rotBtn = document.createElement('div');
+        rotBtn.className = 'circle-btn'; rotBtn.innerHTML = 'F11';
+        document.getElementById('top-right').appendChild(rotBtn);
+        rotBtn.onclick = () => {
+            if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => alert("Разверните экран!"));
+            if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+        };
+    })();
+// --- // --- ULTIMATE STATE SYNC (СИНХРОНИЗАЦИЯ СОСТОЯНИЯ) ---
+(function() {
+    const SYNC_INTERVAL = 50; // Проверка каждые 0.05 сек (очень быстро)
+    let globalState = {};    // Здесь хранится ПРАВДА о мире
+
+    // 1. Функция-обертка для создания объекта
+    window.syncSpawn = function(id, data, isLocal = false) {
+        if (!shapes[id]) {
+            spawnObject(id, data.type, data.style || 'toon', data.pos, data.color, data.h, data.ry, false, data.isPersistent);
+        }
+        if (isLocal) {
+            globalState[id] = data;
+            channel.publish('s', { i: id, d: data }); // Краткие имена для экономии трафика
+        }
+    };
+
+    // 2. Слушаем сеть (Мгновенное обновление)
+    channel.subscribe('s', m => {
+        const { i, d } = m.data;
+        globalState[i] = d;
+        if (!shapes[i]) window.syncSpawn(i, d, false);
+    });
+
+    // 3. МАЧТОВАЯ ПРОВЕРКА (Синхронизирует всё, что "зависло")
+    setInterval(() => {
+        // Проверяем локальные фигуры, которых нет в глобальном состоянии
+        Object.keys(shapes).forEach(id => {
+            if (id.startsWith('player')) return; // Не трогаем игроков
+            
+            if (!globalState[id]) {
+                const s = shapes[id];
+                const data = {
+                    type: s.userData.type || 'cube',
+                    pos: { x: s.position.x, y: s.position.y, z: s.position.z },
+                    color: s.userData.color,
+                    h: s.userData.h,
+                    ry: s.rotation.y
+                };
+                globalState[id] = data;
+                channel.publish('s', { i: id, d: data });
+            }
+        });
+    }, SYNC_INTERVAL);
+
+    // 4. ПЕРЕХВАТ КНОПОК (Чтобы всё шло через синхронизацию)
+    
+    // Кнопка одиночного спавна
+    const spawnBtn = document.getElementById('spawn-btn');
+    const newSpawnBtn = spawnBtn.cloneNode(true);
+    spawnBtn.parentNode.replaceChild(newSpawnBtn, spawnBtn);
+    newSpawnBtn.onclick = () => {
+        const id = 'obj_' + myId + '_' + Date.now();
+        const p = player.position.clone().add(new THREE.Vector3(0,0,-4).applyAxisAngle(new THREE.Vector3(0,1,0), yaw));
+        const data = { type: document.getElementById('shape-select').value, pos: {x:p.x, y:p.y, z:p.z}, color: Math.random()*0xffffff, h:1 };
+        window.syncSpawn(id, data, true);
+    };
+
+    // Кнопка МАССОВОЙ генерации (🎲)
+    setTimeout(() => {
+        const genBtn = document.querySelector('#top-right .circle-btn:nth-child(1)'); 
+        if(genBtn) {
+            const newGenBtn = genBtn.cloneNode(true);
+            genBtn.parentNode.replaceChild(newGenBtn, genBtn);
+            newGenBtn.onclick = () => {
+                for (let i = 0; i < 30; i++) { // Ограничим до 30 для стабильности
+                    const id = 'mass_' + myId + '_' + Date.now() + '_' + i;
+                    const data = {
+                        type: types[Math.floor(Math.random()*types.length)],
+                        pos: { x: (Math.random()-0.5)*100, z: (Math.random()-0.5)*100 },
+                        color: Math.random()*0xffffff,
+                        h: 0.5 + Math.random()*2
+                    };
+                    window.syncSpawn(id, data, true);
+                }
+            };
+        }
+    }, 1000);
+
+    // 5. ПОДГРУЗКА ПРИ ВХОДЕ (Запрос всей базы)
+    channel.subscribe('req_db', m => {
+        if (m.data.f !== myId) channel.publish('res_db', { t: m.data.f, db: globalState });
+    });
+    channel.subscribe('res_db', m => {
+        if (m.data.t === myId) {
+            Object.entries(m.data.db).forEach(([id, data]) => {
+                if (!shapes[id]) {
+                    globalState[id] = data;
+                    window.syncSpawn(id, data, false);
+                }
+            });
+        }
+    });
+    
+    // Запрашиваем базу у тех, кто онлайн
+    setTimeout(() => channel.publish('req_db', { f: myId }), 1000);
+
+    console.log("💎 Система полной синхронизации запущена");
+})();
+// --- ДОБАВЛЕНИЕ КНОПКИ ПЕРВОГО ЛИЦА ЧЕРЕЗ JS ---
+(function() {
+    // 1. Создаем элемент кнопки
+    const fpBtn = document.createElement('div');
+    
+    // 2. Настраиваем стили и иконку
+    fpBtn.className = 'circle-btn';
+    fpBtn.id = 'fp-toggle-btn';
+    fpBtn.innerHTML = 'V'; // Иконка камеры
+    fpBtn.title = 'Вид от первого лица (V)';
+    
+    // 3. Добавляем в контейнер в правом верхнем углу
+    const container = document.getElementById('top-right');
+    if (container) {
+        container.appendChild(fpBtn);
+    }
+
+    // 4. Функция переключения
+    const toggleFP = () => {
+        window.isFirstPerson = !window.isFirstPerson;
+        
+        // Визуальное состояние игрока
+        if (typeof playerBody !== 'undefined') {
+            playerBody.visible = !window.isFirstPerson;
+        }
+
+        // Включение/выключение прицела
+        const crosshair = document.getElementById('crosshair');
+        if (crosshair) {
+            crosshair.style.display = window.isFirstPerson ? 'block' : 'none';
+        }
+
+        // Подсветка кнопки при активации
+        fpBtn.style.background = window.isFirstPerson ? 'var(--main)' : 'var(--ui-panel)';
+        fpBtn.style.color = window.isFirstPerson ? '#000' : 'var(--main)';
+        
+        console.log("First Person:", window.isFirstPerson);
+    };
+
+    // 5. Обработка нажатий (мышь и тач)
+    fpBtn.addEventListener('click', toggleFP);
+    
+    // Добавляем горячую клавишу "V" для удобства
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'KeyV') toggleFP();
+    });
+
+    console.log("✅ Кнопка управления камерой добавлена");
+})();
+
+// --- // --- ФУНКЦИЯ ОЧИСТКИ МИРА ---
+(function() {
+    // 1. Создаем кнопку "Очистить"
+    const clearBtn = document.createElement('div');
+    clearBtn.className = 'circle-btn';
+    clearBtn.innerHTML = '🗑️';
+    clearBtn.style.borderColor = '#ff4444'; // Красный цвет для предупреждения
+    clearBtn.style.color = '#ff4444';
+    clearBtn.title = 'Очистить мир для всех';
+    
+    const container = document.getElementById('top-right');
+    if (container) container.appendChild(clearBtn);
+
+    // 2. Логика удаления объектов
+    const clearAllObjects = () => {
+        Object.keys(shapes).forEach(id => {
+            // Удаляем объект из сцены
+            scene.remove(shapes[id]);
+            // Удаляем из локального реестра
+            delete shapes[id];
+        });
+        
+        // Очищаем глобальное состояние (если используется модуль синхронизации)
+        if (typeof globalState !== 'undefined') {
+            for (let id in globalState) delete globalState[id];
+        }
+        
+        console.log("Мир очищен");
+    };
+
+    // 3. Подписка на сетевое событие очистки
+    channel.subscribe('clear_world', () => {
+        clearAllObjects();
+    });
+
+    // 4. Обработка нажатия
+    clearBtn.onclick = () => {
+        if (confirm("Вы уверены, что хотите удалить ВСЕ объекты для ВСЕХ игроков?")) {
+            // Сначала удаляем у себя
+            clearAllObjects();
+            // Отправляем сигнал остальным
+            channel.publish('clear_world', {});
+        }
+    };
+
+    // Добавляем горячую клавишу "X" для быстрой очистки
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'KeyX') clearBtn.onclick();
+    });
+})();
+
+</script>
+<script src="https://dmamax.netlify.app/legal-module.js"></script>
+</body>
+</html>
