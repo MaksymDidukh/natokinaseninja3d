@@ -48,8 +48,8 @@
 </div>
 
 <div id="top-right">
-    <div class="circle-btn" id="view-btn" title="Вид">👁️</div>
-    <div class="circle-btn" id="theme-btn" title="Тема">🌗</div>
+    <div class="circle-btn" id="view-btn" title="Вид">ADD</div>
+    <div class="circle-btn" id="theme-btn" title="Тема">THEME</div>
     <select id="shape-select">
         <option value="cube">Блок</option>
         <option value="sphere">Сфера</option>
@@ -62,7 +62,7 @@
         <option value="shiny">Shiny</option>
         <option value="ghost">Ghost</option>
     </select>
-    <div class="circle-btn" id="spawn-btn" style="background: var(--main); color: black;">📦</div>
+    <div class="circle-btn" id="spawn-btn" style="background: var(--main); color: black;">ADD+</div>
 </div>
 
 <div id="controls">
@@ -435,7 +435,7 @@
     // Массовая генерация
     (function() {
         const genBtn = document.createElement('div');
-        genBtn.className = 'circle-btn'; genBtn.innerHTML = '🎲';
+        genBtn.className = 'circle-btn'; genBtn.innerHTML = 'ADD++';
         genBtn.style.background = 'linear-gradient(45deg, #00ff88, #00c8ff)'; genBtn.style.color = 'black';
         document.getElementById('top-right').appendChild(genBtn);
         function massSpawn() {
@@ -451,7 +451,7 @@
     // Кнопка поворота/полного экрана
     (function() {
         const rotBtn = document.createElement('div');
-        rotBtn.className = 'circle-btn'; rotBtn.innerHTML = '📱';
+        rotBtn.className = 'circle-btn'; rotBtn.innerHTML = 'F11';
         document.getElementById('top-right').appendChild(rotBtn);
         rotBtn.onclick = () => {
             if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => alert("Разверните экран!"));
@@ -564,7 +564,7 @@
     // 2. Настраиваем стили и иконку
     fpBtn.className = 'circle-btn';
     fpBtn.id = 'fp-toggle-btn';
-    fpBtn.innerHTML = '🎥'; // Иконка камеры
+    fpBtn.innerHTML = 'V'; // Иконка камеры
     fpBtn.title = 'Вид от первого лица (V)';
     
     // 3. Добавляем в контейнер в правом верхнем углу
